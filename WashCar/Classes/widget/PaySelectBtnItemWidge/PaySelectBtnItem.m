@@ -1,0 +1,62 @@
+//
+//  PaySelectBtnItem.m
+//  WashCar
+//
+//  Created by yangyixian on 15/1/8.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "PaySelectBtnItem.h"
+
+#define kCommomW  4 //文字和图片之间距离
+
+@implementation PaySelectBtnItem
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self) {
+        // 1.文字居中
+       // self.titleLabel.textAlignment = NSTextAlignmentCenter;
+        
+        // 2.文字大小
+        self.titleLabel.font = FONT_TextSize_S3_Bold;
+        [self setTitleColor:RGB_TextColor_C11 forState:UIControlStateNormal];
+        [self setTitleColor:RGB_TextColor_C11 forState:UIControlStateSelected];
+        
+        // 3.图片的内容模式
+        self.imageView.contentMode = UIViewContentModeScaleAspectFit;
+        
+        // 4.设置选中时的背景
+//        [self setBackgroundImage:[UIImage imageNamed:kDockItemSelectedBG] forState:UIControlStateSelected];
+    }
+    return self;
+}
+#pragma mark 覆盖父类在highlighted时的所有操作
+- (void)setHighlighted:(BOOL)highlighted {
+    //    [super setHighlighted:highlighted];
+}
+
+//conntentRect item 为的尺寸
+#pragma mark 调整内部UILabel的frame
+- (CGRect)titleRectForContentRect:(CGRect)contentRect
+{
+    CGFloat titleX = 0;
+    CGFloat titleY = 0;
+    CGFloat titleW = contentRect.size.width  - kCommomW - 8.f;
+    CGFloat titleH =contentRect.size.height ;
+    return CGRectMake(titleX, titleY, titleW, titleH);
+    
+}
+#pragma mark 调整内部ImageView的frame
+- (CGRect)imageRectForContentRect:(CGRect)contentRect
+{
+     CGFloat imageX = contentRect.size.width - 8;
+    CGFloat imageY = (contentRect.size.height - 4.f)/2;
+    CGFloat imageW = 8.f;
+    CGFloat imageH = 4.f;
+    return CGRectMake(imageX, imageY, imageW, imageH);
+ 
+   
+}
+
+@end

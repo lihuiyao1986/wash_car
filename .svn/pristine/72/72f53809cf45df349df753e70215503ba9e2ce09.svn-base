@@ -1,0 +1,50 @@
+//
+//  GXModel.m
+//  WashCar
+//
+//  Created by loki on 15/1/19.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "GXModel.h"
+#import "TablePropertyModel.h"
+
+@implementation GXModel
+
+- (NSMutableDictionary *)tableProperties
+{
+    //存放表属性的字典
+    NSMutableDictionary *dict = [super tableProperties];
+    
+    //是否读取字段
+    TablePropertyModel *isReadProperty = [[TablePropertyModel alloc]init];
+    isReadProperty.fieldname = @"noticeIsRead";
+    isReadProperty.fieldvalue = [NSNumber numberWithBool:self.noticeIsRead];
+    isReadProperty.fieldtype = sqlite_field_type_text;
+    [dict setObject:isReadProperty forKey:isReadProperty.fieldname];
+    
+    //消息内容字段
+    TablePropertyModel *contentProperty = [[TablePropertyModel alloc]init];
+    contentProperty.fieldname = @"noticeContent";
+    contentProperty.fieldvalue = self.noticeContent;
+    contentProperty.fieldtype = sqlite_field_type_text;
+    [dict setObject:contentProperty forKey:contentProperty.fieldname];
+    
+    //消息标题字段
+    TablePropertyModel *noticeTitleProperty = [[TablePropertyModel alloc]init];
+    noticeTitleProperty.fieldname = @"noticeTitle";
+    noticeTitleProperty.fieldvalue = self.noticeTitle;
+    noticeTitleProperty.fieldtype = sqlite_field_type_text;
+    [dict setObject:noticeTitleProperty forKey:noticeTitleProperty.fieldname];
+    
+    //消息类型字段
+    TablePropertyModel *noticeTypeProperty = [[TablePropertyModel alloc]init];
+    noticeTypeProperty.fieldname = @"noticeType";
+    noticeTypeProperty.fieldvalue = self.noticeType;
+    noticeTypeProperty.fieldtype = sqlite_field_type_text;
+    [dict setObject:noticeTypeProperty forKey:noticeTypeProperty.fieldname];
+    
+    return dict;
+}
+
+@end

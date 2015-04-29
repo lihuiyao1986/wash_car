@@ -1,0 +1,52 @@
+//
+//  PayDetailModel.h
+//  WashCar
+//
+//  Created by yanshengli on 15-1-12.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import <Foundation/Foundation.h>
+#import "BaseModel.h"
+
+#pragma mark 支付订单状态枚举
+typedef NS_ENUM(NSInteger, PayDetailStatusType) {
+    PayDetailStatus_Finished  = 0,//已完成
+    PayDetailStatus_Unfinished  = 1,//未完成
+};
+
+/***
+ *
+ *@description:支付订单状态详情--接口
+ *@author:liys
+ *@since:2014-1-12
+ *@corp:cheletong
+ */
+@interface PayDetailModel :BaseModel
+#pragma mark 标题
+@property(nonatomic,copy)NSString *title;
+#pragma mark 时间
+@property(nonatomic,copy)NSString *time;
+#pragma mark 描述
+@property(nonatomic,copy)NSString *desc;
+#pragma mark 按钮标题
+@property(nonatomic,copy)NSString *btnTitle;
+#pragma mark 按钮处理事件
+@property(nonatomic,assign)SEL btnSelector;
+#pragma mark 按钮处理target
+@property(nonatomic,strong)NSObject *btnTarget;
+#pragma mark 订单状态
+@property(nonatomic,assign)PayDetailStatusType status;
+#pragma mark 是否是第一个
+@property(nonatomic,assign)BOOL isFirst;
+#pragma mark 是否是最后一个
+@property(nonatomic,assign)BOOL isLast;
+#pragma mark 确认完成洗车按钮处理事件
+@property(nonatomic,assign)SEL confirmBtnSelector;
+#pragma mark 确认完成洗车按钮处理target
+@property(nonatomic,strong)NSObject *confirmBtnTarget;
+#pragma mark 状态图片
+@property(nonatomic,copy)NSString *statusPic;
+#pragma mark 是否为空视图
+@property(nonatomic,assign)BOOL isBlankView;
+@end

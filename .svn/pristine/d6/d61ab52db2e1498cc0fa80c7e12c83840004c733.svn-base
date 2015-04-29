@@ -1,0 +1,138 @@
+//
+//  PersonalDataController.m
+//  WashCar
+//
+//  Created by mac on 15/1/5.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "PersonalDataController.h"
+#import "TapImageViewWidget.h"
+#import "ImageCache.h"
+
+@interface PersonalDataController () <TapImageViewWidgetDelegate>
+{
+    TapImageViewWidget* photoImgView;      // 照片
+    UILabel* lbName;                // 姓名
+    UILabel* lbTel;                 // 电话
+    UITextField* tfName;
+    UITextField* tfTel;
+    UIButton* btnSave;              // 保存
+}
+@end
+
+#define photoImgViewX           ScreenWidth / 2 - photoImgViewW / 2
+#define photoImgViewY           75
+#define photoImgViewW           80
+#define photoImgViewH           80
+#define lbNameX                 30
+#define lbNameY                 CGRectGetMaxY(photoImgView.frame) + 40
+#define lbNameW                 40
+#define lbNameH                 40
+#define btnSaveX                25
+#define btnSaveY                CGRectGetMaxY(lbTel.frame) + 40
+#define btnSaveW                270
+#define btnSaveH                40
+
+@implementation PersonalDataController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    [self drawUIView];
+}
+
+#pragma mark - 搭建UI控件
+- (void) drawUIView
+{
+    photoImgView = [[TapImageViewWidget alloc] init];
+    photoImgView.frame = CGRectMake(photoImgViewX, photoImgViewY, photoImgViewW, photoImgViewH);
+    photoImgView.delegate = self;
+    photoImgView.layer.cornerRadius = 40;
+    photoImgView.layer.borderWidth = 1;
+    photoImgView.layer.borderColor = [UIColor blackColor].CGColor;
+    [ImageCache loadImageWithUrl:@"http://b.hiphotos.baidu.com/image/pic/item/e4dde71190ef76c666af095f9e16fdfaaf516741.jpg" imageView:photoImgView placeholderImage:@"" cacheImage:YES];
+    
+    [self.view addSubview:photoImgView];
+    
+    lbName = [[UILabel alloc] init];
+    lbName.frame = CGRectMake(lbNameX, lbNameY, lbNameW, lbNameH);
+    lbName.font = FONT_TextSize_S1;
+    lbName.text = @"称呼";
+    [self.view addSubview:lbName];
+    
+    tfName = [[UITextField alloc] init];
+    tfName.frame = CGRectMake(CGRectGetMaxX(lbName.frame) + 15, lbNameY, lbNameW + 150, lbNameH);
+    tfName.placeholder = @"如何称呼您";
+    tfName.font = FONT_TextSize_S1;
+    tfName.borderStyle = UITextBorderStyleBezel;
+    [self.view addSubview:tfName];
+    
+    lbTel = [[UILabel alloc] init];
+    lbTel.frame = CGRectMake(lbNameX, CGRectGetMaxY(lbName.frame) + 20, lbNameW, lbNameH);
+    lbTel.font = FONT_TextSize_S1;
+    lbTel.text = @"电话";
+    [self.view addSubview:lbTel];
+    
+    tfTel = [[UITextField alloc] init];
+    tfTel.frame = CGRectMake(CGRectGetMaxX(lbTel.frame) + 15, CGRectGetMaxY(lbName.frame) + 20, lbNameW + 150, lbNameH);
+    tfTel.placeholder = @"您的电话";
+    tfTel.font = FONT_TextSize_S1;
+    tfTel.borderStyle = UITextBorderStyleBezel;
+    [self.view addSubview:tfTel];
+    
+    btnSave = [UIButton buttonWithType:UIButtonTypeRoundedRect];
+    btnSave.frame = CGRectMake(btnSaveX, btnSaveY, btnSaveW, btnSaveH);
+    btnSave.tag = 1;
+    [btnSave setTitle:@"保存" forState:UIControlStateNormal];
+    btnSave.titleLabel.font = FONT_TextSize_S1;
+    btnSave.layer.cornerRadius = 5;
+    btnSave.backgroundColor = [UIColor redColor];
+    btnSave.tintColor = [UIColor whiteColor];
+    [btnSave addTarget:self action:@selector(btnCilcked:) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:btnSave];
+}
+
+#pragma mark - 点击事件
+- (void)imageTap:(id)sender imageView:(UIImageView *)imageView
+{
+    [self showAlert:@"" message:@"tap imgView" type:AlertViewType_Toast];
+}
+
+- (void) btnCilcked:(UIButton*) sender
+{
+    NSInteger tag = sender.tag;
+    switch (tag) {
+        case 1:
+        {
+            APP_Log(@"name - %@ , tel - %@",tfName.text,tfTel.text);
+            [self popViewControllerFromTop];
+            break;
+        }
+            
+        default:
+            break;
+    }
+}
+
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    [[[UIApplication sharedApplication] keyWindow] endEditing:YES];
+}
+
+#pragma mark - 导航栏
+- (BaseNaviBarWidget *)navBar
+{
+    NavBarViewWidget *navBar = [[NavBarViewWidget alloc]init];
+    navBar.leftIcon = [UIImage imageNamed:@"back"];
+    navBar.centerTitle = @"个人资料";
+    navBar.delegate = self;
+    return navBar;
+}
+
+-(void)leftNavBarBtnClicked:(UIButton *)leftNavBarBtn
+{
+    [self popViewControllerFromTop];
+}
+
+@end

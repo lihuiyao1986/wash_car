@@ -1,0 +1,31 @@
+//
+//  PayIndexModel.h
+//  WashCar
+//
+//  Created by yangyixian on 15/1/12.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//  description:支付首页数据模型
+
+#import "BaseModel.h"
+
+@interface PayIndexModel : BaseModel
+//@property (nonatomic, copy) NSString *phone; //电话号码
+//@property (nonatomic, copy) NSString *carInfo; //车牌信息
+//@property (nonatomic ,copy)NSString *carAlpha;//所在地字母
+//@property (nonatomic ,copy)NSString *carArea;//所在地
+//@property (nonatomic ,copy) NSString *carNum;//车牌后5位号码
+//@property (nonatomic, copy) NSString *carPosition; //车辆位置
+//@property (nonatomic, assign) PayType payType;//支付的方式
+//@property (nonatomic, assign) BOOL ;
+
+
+@property(nonatomic,assign) NSInteger carId;//车辆编号
+@property (nonatomic, copy) NSString *carPlateNum; //车牌信息
+@property (nonatomic, copy) NSString *address; //洗车地址
+@property (nonatomic, assign) CLLocationDegrees carLongitude;//车辆经度
+@property (nonatomic, assign) CLLocationDegrees carLatitude;//车辆纬度
+
+//初始化字典模型
+- (instancetype)initWithDict:(NSDictionary *)dict;
++ (instancetype)orderWithDict:(NSDictionary *)dict;
+@end

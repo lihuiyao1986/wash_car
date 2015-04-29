@@ -1,0 +1,941 @@
+//
+//  PayDetailController.m
+//  WashCar
+//
+//  Created by yanshengli on 15-1-7.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "PayDetailController.h"
+#import "LineViewWidget.h"
+#import "CustTextImageBtnWidget.h"
+#import "ImageCache.h"
+#import "CustBgViewWidget.h"
+#import "PayDetailModel.h"
+#import "PayDetailCell.h"
+#import "UIView+WashCarUtility.h"
+#import "MJRefresh.h"
+#import "OrderDao.h"
+#import "OrderDaoModel.h"
+#import "NSString+Utility.h"
+#import "BeforeViewController.h"
+#import "AfterViewController.h"
+
+//联系客户按钮对应的宽度
+#define contactBtnAreaW 82.f
+//定位图标的宽度
+#define mapIconW 16.f
+//定位图标的高度
+#define mapIconH 19.f
+//显示定位信息label的长度
+#define addressW 160.f
+//定位图标x偏移量
+#define mapIconXPadding 15.f
+//分割线的长度
+#define seperatorLineW 2.f
+//正在定位的提示
+#define locatingTitle @"正在获取车辆位置..."
+//定位失败的提示
+#define locateFailTitle @"对不起，获取您的位置失败"
+
+//中间视图的高度
+#define centerVH 150.f
+//回首页按钮的标题
+#define backToHomeBtnTitle @"首页"
+//tableviewCell的高度
+#define tableCellItemH 110.f
+//第一个cell上面的view的高度
+#define firstTableCellTopViewH 10.f
+//最后一个cell下面的view的高度
+#define lastTableCellAboveViewH 100.f
+
+//查询用户订单状态请求tag
+#define orderStatusQueryReqTag 100
+//确认订单的请求tag
+#define orderConfirmReqTag 200
+
+//源日期格式
+#define srcTimeFormat @"yyyyMMddHHmmss"
+//目标日期格式
+#define targetTimeFormat @"yyyy-MM-dd HH:mm:ss"
+
+/***
+ *
+ *@description:支付详情页面--实现
+ *@author:liys
+ *@since:2014-1-7
+ *@corp:cheletong
+ */
+@interface PayDetailController ()
+<TapImageViewWidgetDelegate,
+UITableViewDelegate,
+UITableViewDataSource,
+BMKLocationServiceDelegate,
+BMKGeoCodeSearchDelegate>
+@end
+
+@implementation PayDetailController
+
+#pragma mark 头部视图
+@synthesize headView;
+
+#pragma mark 中间视图
+@synthesize centerView;
+
+#pragma mark 底部视图
+@synthesize bottomView;
+
+#pragma mark 生命周期方法--viewDidLoad
+- (void)viewDidLoad
+{
+    //1.调用父类的方法
+    [super viewDidLoad];
+    
+    //2.初始化数据
+    [self initData];
+    
+    //3.初始化ui
+    [self initView];
+    
+    //4.初始化定位服务
+    //[self initBDMapLocService];
+    
+    //5.注册通知
+    [self registerNotifications];
+}
+
+#pragma mark 注册通知
+-(void)registerNotifications
+{
+    [WashcarDefaultCenter addObserver:self
+                             selector:@selector(handleUpdateOrderStatus:)
+                                 name:WashcarUpdateOrderStatusNotification
+                               object:nil];
+}
+
+#pragma mark 发送通知
+-(void)postRefreshOrderStatusNotification
+{
+    [WashcarDefaultCenter postNotificationName:WashcarUpdateOrderStatusNotification object:nil];
+}
+
+#pragma mark 更新订单状态
+-(void)handleUpdateOrderStatus:(NSNotification*)notification
+{
+    //刷新订单状态
+    [self beginRefreshOrderStatus];
+}
+
+#pragma mark 移除通知
+-(void)removeNotifications
+{
+    
+}
+
+#pragma mark 生命周期方法--viewWillAppear
+-(void)viewWillAppear:(BOOL)animated
+{
+    //1.调用父类的方法
+    [super viewWillAppear:animated];
+    
+    //2.设置定位对象代理
+    //_locService.delegate = self;
+    //_geoCodeSearch.delegate = self;
+    
+    //3.位置定位
+    //[self beginLocate];
+    
+    //4.刷新订单状态
+    [self postRefreshOrderStatusNotification];
+}
+
+#pragma mark 生命周期方法--viewWillDisappear
+-(void)viewWillDisappear:(BOOL)animated
+{
+    //1.调用父类的方法
+    [super viewWillDisappear:animated];
+   
+    //2.释放内存
+    //_locService.delegate = nil;
+    //_geoCodeSearch.delegate = nil;
+}
+
+#pragma mark 刷新订单状态
+-(void)beginRefreshOrderStatus
+{
+    [_orderStatusTBView headerBeginRefreshing];
+}
+
+#pragma mark 初始化百度地图定位的service
+//-(void)initBDMapLocService
+//{
+    //_locService = [[BMKLocationService alloc]init];
+    //_geoCodeSearch = [[BMKGeoCodeSearch alloc]init];
+//}
+
+#pragma mark 初始化数据
+-(void)initData
+{
+    _data = [NSMutableArray array];
+    
+    __weak PayDetailController *this = self;
+    
+    //1.下单成功
+    PayDetailModel *order_success_model = [[PayDetailModel alloc]init];
+    order_success_model.status =  PayDetailStatus_Unfinished;
+    order_success_model.title = @"成功下单";
+    order_success_model.isFirst = YES;
+    order_success_model.statusPic = [NSString stringWithFormat:@"order_status_%i",WashCarOrderStatus_Order_Success];
+    order_success_model.desc = @"成功下单，跑男会在5min内联系您。";
+    [_data addObject:order_success_model];
+    
+    //2.已接单
+    PayDetailModel *order_recevied_model = [[PayDetailModel alloc]init];
+    order_recevied_model.title = @"已接单";
+    order_recevied_model.statusPic = [NSString stringWithFormat:@"order_status_%i",WashCarOrderStatus_Order_Received];
+    order_recevied_model.status = PayDetailStatus_Unfinished;
+    order_recevied_model.desc = @"跑男已接单，跑男飞奔而来...";
+    [_data addObject:order_recevied_model];
+    
+    //3.已到达
+    PayDetailModel *arrival_model = [[PayDetailModel alloc]init];
+    arrival_model.title = @"到达停车位置";
+    arrival_model.status = PayDetailStatus_Unfinished;
+    arrival_model.desc = @"跑男已到达停车点，洗车前跑男会仔细检查车辆并拍照。";
+    arrival_model.statusPic = [NSString stringWithFormat:@"order_status_%i",WashCarOrderStatus_Order_Arrival];
+    arrival_model.btnTitle = @"照片";
+    arrival_model.firstBtnClickedBlock = ^()
+    {
+        [this checkPrePic];
+    };
+    [_data addObject:arrival_model];
+    
+    //4.正在洗车
+    PayDetailModel *washing_car_model = [[PayDetailModel alloc]init];
+    washing_car_model.title = @"正在洗车";
+    washing_car_model.status = PayDetailStatus_Unfinished;
+    washing_car_model.statusPic = [NSString stringWithFormat:@"order_status_%i",WashCarOrderStatus_Order_Washing];
+    washing_car_model.desc = @"别人洗车的时间，我却用来喝咖啡，任性!";
+    [_data addObject:washing_car_model];
+
+    //5.洗车完成
+    PayDetailModel *finished_wash_model = [[PayDetailModel alloc]init];
+    finished_wash_model.title = @"洗车完成";
+    finished_wash_model.status = PayDetailStatus_Unfinished;
+    finished_wash_model.desc = @"建议您确认完成洗车之前到现场查看洗车效果";
+    finished_wash_model.btnTitle = @"照片";
+    finished_wash_model.statusPic = [NSString stringWithFormat:@"order_status_%i",WashCarOrderStatus_Order_Finished];
+    finished_wash_model.isLast = YES;
+    finished_wash_model.firstBtnClickedBlock = ^()
+    {
+        [this checkAfterPic];
+    };
+    finished_wash_model.secondBtnClickedBlock = ^()
+    {
+        [this confirmWashCar];
+    };
+    [_data addObject:finished_wash_model];
+    
+    //6.空白视图－1
+    PayDetailModel *blank_one_model = [[PayDetailModel alloc]init];
+    blank_one_model.isBlankView = YES;
+    [_data addObject:blank_one_model];
+    
+    //7.空白视图－2
+    PayDetailModel *blank_two_model = [[PayDetailModel alloc]init];
+    blank_two_model.isBlankView = YES;
+    [_data addObject:blank_two_model];
+}
+
+
+#pragma mark 点击查看洗车前照片按钮
+-(void)checkPrePic
+{
+    BeforeViewController *checkPrePicController = [[BeforeViewController alloc]init];
+    [self pushViewControllerFromRight:checkPrePicController];
+}
+
+#pragma mark 点击查看洗车后照片按钮
+-(void)checkAfterPic
+{
+    AfterViewController *checkAfterPicController = [[AfterViewController alloc]init];
+    [self pushViewControllerFromRight:checkAfterPicController];
+}
+
+#pragma mark 点击确认完成洗车按钮
+-(void)confirmWashCar
+{
+    //1.先查询订单
+    OrderDao *orderDao = [[OrderDao alloc]init];
+    NSString *mobileno = [[CommonUtils loginUser] objectForKey:@"userAccount"];
+    NSMutableArray *orders = [orderDao queryValidOrderByMobileno:mobileno];
+    
+    //2.获取订单号
+    NSString *orderId = [[orders firstObject] objectForKey:@"orderno"];
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:orderId,@"orderId", nil];
+    [self doPost:confirmOrderUrl params:params tag:orderConfirmReqTag showProgress:YES];
+}
+
+
+#pragma mark 初始化视图
+-(void)initView
+{
+    //1.头部视图
+    [self.view addSubview:self.headView];
+    
+    //2.中间视图
+    [self.view addSubview:self.centerView];
+    
+    //3.底部视图
+    [self.view addSubview:self.bottomView];
+}
+
+//----------------头部视图区域-------------------//
+#pragma mark 头部按钮
+-(UIView *)headView
+{
+    if (!_headView)
+    {
+        //1.头部背景视图
+        CGRect headViewFrame = Rect(0.f, 0.f, SCREEN_WIDTH, TOP_BLANNER_HEIGHT + SCREEN_HEIGHT_START);
+        _headView = [[CustBgViewWidget alloc]initWithFrame:headViewFrame
+                                             shadowOpacity:1.f
+                                               shadowColor:0x999999
+                                              shadowRadius:1.f
+                                                   bgColor:0x4193cd
+                                              bgColorAlpha:1.0
+                                              cornerRadius:0
+                                             shadowYOffset:1.f
+                                             shadowXOffset:0.f];
+        
+        //3.定位图标
+        CGFloat mapIconX = mapIconXPadding;
+        CGFloat mapIconY = SCREEN_HEIGHT_START + (TOP_BLANNER_HEIGHT- mapIconH)/2;
+        CGRect  mapIconFrame = (CGRect){mapIconX,mapIconY,mapIconW,mapIconH};
+        UIImageView *mapIcon = [[UIImageView alloc]initWithFrame:mapIconFrame];
+        mapIcon.image = [UIImage imageNamed:@"myLocation"];
+        mapIcon.contentMode = UIViewContentModeScaleAspectFit;
+        [_headView addSubview:mapIcon];
+        
+        //4.定位label
+        CGFloat addressX = CGRectGetMaxX(mapIcon.frame) + 15.f;
+        CGFloat addressY = SCREEN_HEIGHT_START;
+        CGFloat addressH = TOP_BLANNER_HEIGHT;
+        CGRect  addressFrame = (CGRect){addressX,addressY,addressW,addressH};
+        _addresslb = [[UILabel alloc] initWithFrame:addressFrame];
+        _addresslb.backgroundColor = [UIColor clearColor];
+        _addresslb.text = locatingTitle;
+        _addresslb.lineBreakMode = NSLineBreakByTruncatingTail;
+        _addresslb.numberOfLines = 2;
+        _addresslb.textColor = RGB_TextColor_C0;
+        _addresslb.font = FONT_TextSize_S0;
+        _addresslb.userInteractionEnabled = YES;
+        //UITapGestureRecognizer *locateRecognizer = [[UITapGestureRecognizer alloc]initWithTarget:self
+        //                                                                                          action:@selector(locateRecognizerTaped:)];
+        //[_addresslb addGestureRecognizer:locateRecognizer];
+        [_headView addSubview:_addresslb];
+        
+        //5.分割线
+        CGFloat lineX = CGRectGetWidth(_headView.frame) - 82.f;
+        CGFloat lineY = SCREEN_HEIGHT_START;
+        CGFloat lineW = seperatorLineW;
+        CGFloat lineH = TOP_BLANNER_HEIGHT;
+        CGRect  lineFrame = Rect(lineX, lineY, lineW, lineH);
+        UIImageView *separatorLine = [[UIImageView alloc]initWithFrame:lineFrame];
+        separatorLine.image = [UIImage imageNamed:@"seperatorLine"];
+        separatorLine.contentMode = UIViewContentModeScaleAspectFit;
+        separatorLine.backgroundColor = [UIColor clearColor];
+        [_headView addSubview:separatorLine];
+        
+        //6.客服按钮区域
+        CGFloat callBtnViewW = 82.f;
+        CGFloat callBtnViewH = TOP_BLANNER_HEIGHT;
+        CGFloat callBtnViewX = CGRectGetMaxX(separatorLine.frame);
+        CGFloat callBtnViewY = SCREEN_HEIGHT_START;
+        CGRect  callBtnViewFrame = Rect(callBtnViewX, callBtnViewY, callBtnViewW, callBtnViewH);
+        UIButton *callBtnView = [UIButton buttonWithType:UIButtonTypeCustom];
+        callBtnView.backgroundColor = [UIColor clearColor];
+        callBtnView.frame = callBtnViewFrame;
+        [callBtnView addTarget:self action:@selector(callServiceBtnClicked:) forControlEvents:UIControlEventTouchUpInside];
+        [_headView addSubview:callBtnView];
+        
+        //7.客服按钮
+        _callServiceBtn = [[TapImageViewWidget alloc]initWithImage:[UIImage imageNamed:@"callIcon"]];
+        CGFloat callBtnW = 20.f;
+        CGFloat callBtnH = 21.f;
+        CGFloat callBtnX = (CGRectGetWidth(callBtnView.frame) - callBtnW)/2;
+        CGFloat callBtnY = (CGRectGetHeight(callBtnView.frame) - callBtnH)/2;
+        CGRect  callBtnFrame = Rect(callBtnX, callBtnY, callBtnW, callBtnH);
+        _callServiceBtn.frame = callBtnFrame;
+        _callServiceBtn.backgroundColor = [UIColor clearColor];
+        _callServiceBtn.contentMode = UIViewContentModeScaleAspectFit;
+        _callServiceBtn.delegate = self;
+        [callBtnView addSubview:_callServiceBtn];
+    }
+    return _headView;
+}
+
+#pragma mark
+//-(void)locateRecognizerTaped:(UITapGestureRecognizer*)gesture
+//{
+//    [self beginLocate];
+//}
+
+#pragma mark 客服电话按钮被点击的事件
+-(void)callServiceBtnClicked:(UIButton*)btn
+{
+    [self contactService];
+}
+
+#pragma mark 联系客服
+-(void)contactService
+{
+    [ApplicationDelegate showAlertWithTowBtns:nil message:@"拨打洗车人员电话吗?" doneBtnFinishBlock:^()
+     {
+         [CommonUtils openUrl:WashCarServiceTelNum urltype:TELURL];
+     }];
+    
+}
+
+#pragma mark 开始定位
+//-(void)beginLocate
+//{
+//    _addresslb.text = locatingTitle;
+//    [_locService startUserLocationService];
+//}
+
+#pragma mark 停止定位
+//-(void)stopLocate
+//{
+//    [_locService stopUserLocationService];
+//    
+//}
+
+#pragma mark BMKLocationServiceDelegate代理方法
+//- (void)didUpdateUserLocation:(BMKUserLocation *)userLocation
+//{
+//    if (userLocation != nil)
+//    {
+//        //创建反地理编码
+//        BMKReverseGeoCodeOption* reverseGeoCodeOption = [[BMKReverseGeoCodeOption alloc] init];
+//        reverseGeoCodeOption.reverseGeoPoint = userLocation.location.coordinate;
+//        
+//        //开始反地理编码
+//        [_geoCodeSearch reverseGeoCode:reverseGeoCodeOption];
+//        
+//        //停止定位
+//        [self stopLocate];
+//    }
+//    else
+//    {
+//        [self stopLocate];
+//        _addresslb.text = locateFailTitle;
+//    }
+//}
+//
+//- (void)didFailToLocateUserWithError:(NSError *)error
+//{
+//    _addresslb.text = locateFailTitle;
+//    [self stopLocate];
+//}
+
+
+#pragma mark - BMKGeoCodeSearchDelegate代理方法
+//- (void)onGetReverseGeoCodeResult:(BMKGeoCodeSearch *)searcher result:(BMKReverseGeoCodeResult *)result errorCode:(BMKSearchErrorCode)error
+//{
+//    if (!error && ![CommonUtils isStrEmpty:result.address])
+//    {
+//        _addresslb.text = result.address;
+//    }
+//    else
+//    {
+//        _addresslb.text = locateFailTitle;
+//    }
+//}
+
+
+
+//----------------底部视图区域----------------------//
+#pragma mark 底部视图
+-(UIView*)bottomView
+{
+    if (!_bottomView)
+    {
+        //1.底部是图
+        CGFloat bottomViewX = 0.f;
+        CGFloat bottomViewY = CGRectGetMaxY(self.centerView.frame);
+        CGFloat bottomViewW = SCREEN_WIDTH;
+        CGFloat bottomViewH = SCREEN_HEIGHT - bottomViewY;
+        CGRect  bottomViewFrame = Rect(bottomViewX, bottomViewY, bottomViewW, bottomViewH);
+        _bottomView = [[UIView alloc]initWithFrame:bottomViewFrame];
+        _bottomView.backgroundColor = [UIColor clearColor];
+        _bottomView.layer.borderColor = [UIColor redColor].CGColor;
+        
+        //2.tableview
+        _orderStatusTBView = [[UITableView alloc]initWithFrame:_bottomView.bounds
+                                                         style:UITableViewStylePlain];
+        _orderStatusTBView.separatorStyle = UITableViewCellSeparatorStyleNone;
+        _orderStatusTBView.delegate = self;
+        _orderStatusTBView.dataSource = self;
+        _orderStatusTBView.backgroundColor = [UIColor clearColor];
+        _orderStatusTBView.showsHorizontalScrollIndicator = NO;
+        _orderStatusTBView.showsVerticalScrollIndicator = NO;
+        _orderStatusTBView.allowsSelection = NO;
+        _orderStatusTBView.pagingEnabled = YES;
+        _orderStatusTBView.contentSize = CGSizeMake(SCREEN_WIDTH, CGFLOAT_MAX);
+        [_bottomView addSubview:_orderStatusTBView];
+        
+        [_orderStatusTBView addHeaderWithTarget:self action:@selector(updateOrderStatus)];
+        [_orderStatusTBView setHeaderRefreshingText:@"正在刷新订单状态..."];
+        
+    }
+    return _bottomView;
+}
+
+#pragma mark 更新订单状态
+- (void)updateOrderStatus
+{
+    //查询用户的订单状态
+    [self queryOrderStatus];
+}
+
+#pragma mark 查询用户的订单状态
+-(void)queryOrderStatus
+{
+    NSDictionary *loginUser = [CommonUtils loginUser];
+    if (loginUser)
+    {
+        //已登录，根据手机号查询订单状态
+        NSString *mobileno = [loginUser objectForKey:@"userAccount"];
+        NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:mobileno,@"userPhone", nil];
+        [self doPost:orderStatusGetUrl params:params tag:orderStatusQueryReqTag showProgress:NO];
+    }
+    else
+    {
+        [_orderStatusTBView headerEndRefreshing];
+    }
+}
+
+#pragma mark 请求成功后回调该函数
+-(void) handleRespResult:(NSDictionary*)result tag:(int)reqTag
+{
+    if (reqTag == orderStatusQueryReqTag )//订单状态查询
+    {
+        //1.根据服务端的结果来更新状态
+        [self saveServerOrderInfo:result];
+        
+        //2.根据数据库中的信息更新订单状态
+        [self updateOrderStatusByDBInfo];
+        
+        //3.结束下拉刷新
+        [_orderStatusTBView headerEndRefreshing];
+    }
+    else if(reqTag == orderConfirmReqTag)//确认订单
+    {
+        [self backToHomeBtnClicked:nil];
+    }
+   
+}
+
+#pragma mark 错误码处理，返回yes代表需要弹出提示
+-(BOOL) handleErrorCode:(int)code info:(NSString *)info tag:(int)reqTag
+{
+    if (reqTag == orderConfirmReqTag)
+    {
+        return YES;
+    }
+    else if(reqTag == orderStatusQueryReqTag)
+    {
+        return NO;
+        
+    }
+    return [super handleErrorCode:code info:info tag:reqTag];
+}
+
+#pragma mark 根据服务端的结果来更新状态
+-(void)saveServerOrderInfo:(NSDictionary*)result
+{
+    //1.先清除订单
+    OrderDao *orderDao = [[OrderDao alloc]init];
+    [orderDao deleteAllOrder];
+    
+    //2.保存服务端返回的订单信息
+    OrderDaoModel *order = [[OrderDaoModel alloc]init];
+    NSDictionary *orderInfo = [result objectForKey:@"orderInfo"];
+    order.orderNo = [NSString stringWithFormat:@"%i",[[orderInfo objectForKey:@"orderId"] intValue]];//订单号
+    order.orderTime = [orderInfo objectForKey:@"orderTime"];//订单时间
+    order.mobile = [orderInfo objectForKey:@"phone"];//手机号
+    order.valid =  [NSString stringWithFormat:@"%i",WashCarOrderValid_Valid];//订单的有效性
+    int orderStatus = [[orderInfo objectForKey:@"status"] intValue];
+    orderStatus = [self convertStatus:orderStatus];
+    order.status = [NSString stringWithFormat:@"%i",orderStatus];//订单当前的状态
+    order.carNumber = [orderInfo objectForKey:@"carPlateNum"];//车牌号
+    order.carPosition = [orderInfo objectForKey:@"address"];//车辆位置
+    
+    //3.更新流程信息
+    NSArray *orderProcessList = [result objectForKey:@"orderProcessList"];
+    for (int index = 0 ; index < orderProcessList.count; index ++)
+    {
+        //3.1 获取对象
+        NSDictionary *item = [orderProcessList objectAtIndex:index];
+        
+        //3.2 转换状态
+        int status = [[item objectForKey:@"status"] intValue];
+        status = [self convertStatus:status];
+        
+        //3.3更新状态和时间
+        NSString *createTime = [item objectForKey:@"createTime"];
+        switch (status)
+        {
+            case WashCarOrderStatus_Order_Success:
+                order.orderTime = createTime;
+                break;
+            case WashCarOrderStatus_Order_Received:
+                order.receivedTime = createTime;
+                break;
+            case WashCarOrderStatus_Order_Arrival:
+                order.arrivalTime = createTime;
+                break;
+            case WashCarOrderStatus_Order_Washing:
+                order.washingTime = createTime;
+                break;
+            case WashCarOrderStatus_Order_Finished:
+                order.finishedTime = createTime;
+                break;
+            default:
+                break;
+        }
+    }
+    
+    //4.保存订单
+    [orderDao saveOrder:order];
+}
+
+
+#pragma mark 转换服务器段的订单状态
+-(int)convertStatus:(int)status
+{
+    /**
+     * 已下单 1000
+     * 派单中  1010
+     * 派单失败 1020
+     * 已接单 2000
+     * 已到达2010
+     * 找到车2020
+     * 洗前拍照完成2030
+     * 洗车中2040
+     * 洗车完成2050
+     * 洗后拍照完成3000
+     * 洗车已确认4000
+     * 撤销订单 5000
+     */
+    int orderStatus = WashCarOrderStatus_Order_Success;
+    switch (status)
+    {
+        case 1000:
+        case 1010:
+        case 1020:
+            orderStatus = WashCarOrderStatus_Order_Success;
+            break;
+        case 2000:
+            orderStatus = WashCarOrderStatus_Order_Received;
+            break;
+        case 2010:
+        case 2020:
+            orderStatus = WashCarOrderStatus_Order_Arrival;
+            break;
+        case 2030:
+        case 2040:
+            orderStatus = WashCarOrderStatus_Order_Washing;
+            break;
+        case 2050:
+            orderStatus = WashCarOrderStatus_Order_Finished;
+            break;
+        default:
+            break;
+    }
+    return orderStatus;
+}
+
+
+#pragma mark 处理请求错误的回调
+-(void)reqErrorHandle:(int)errorCode errormsg:(NSString *)message tag:(int)reqTag
+{
+    if (reqTag == orderStatusQueryReqTag )
+    {
+        //1.根据数据库中的信息更新订单状态
+        [self updateOrderStatusByDBInfo];
+        
+        //2.结束下拉刷新
+        [_orderStatusTBView headerEndRefreshing];
+    }
+}
+
+#pragma mark 根据数据库的信息更新订单状态
+-(void)updateOrderStatusByDBInfo
+{
+    //从本地数据库查询
+    OrderDao *orderDao = [[OrderDao alloc]init];
+    NSDictionary *loginUser = [CommonUtils loginUser];
+    NSString *mobileno = [loginUser objectForKey:@"userAccount"];
+    NSMutableArray *results = [orderDao queryValidOrderByMobileno:mobileno];
+    if (results && results.count > 0)
+    {
+        //1.获取订单
+        NSMutableDictionary *unfinisedOrder = [results firstObject];
+        
+        //2.更新订单数据
+        [self updateOrderData:unfinisedOrder];
+        
+        //3.订单状态
+        int status = [[unfinisedOrder objectForKey:@"status"] intValue];
+        
+        //4.滚动到对应的状态
+        [self scrollViewToIndex:status];
+    }
+    else
+    {
+        NSMutableDictionary *orderInfo = [NSMutableDictionary dictionary];
+        [orderInfo setObject:[NSNumber numberWithInt:WashCarOrderStatus_Order_Success] forKey:@"status"];
+        [self updateOrderData:orderInfo];
+        [self scrollViewToIndex:WashCarOrderStatus_Order_Success];
+    }
+}
+
+#pragma mark 更新订单数据
+-(void)updateOrderData:(NSMutableDictionary*)order
+{
+    // 订单状态
+    int status = [[order objectForKey:@"status"] intValue];
+    // 下单时间
+    NSString *orderTime = [order objectForKey:@"ordertime"];
+    orderTime = [DateUtils formatDateStr:orderTime srcDateFormat:srcTimeFormat targetDateFormat:targetTimeFormat];
+    // 接单时间
+    NSString *receivedTime = [order objectForKey:@"receivedtime"];
+    receivedTime = [DateUtils formatDateStr:receivedTime srcDateFormat:srcTimeFormat targetDateFormat:targetTimeFormat];
+    // 到达停车位的时间
+    NSString *arrivalTime = [order objectForKey:@"arrivaltime"];
+    arrivalTime = [DateUtils formatDateStr:arrivalTime srcDateFormat:srcTimeFormat targetDateFormat:targetTimeFormat];
+    // 开始洗车的时间
+    NSString *washingTime = [order objectForKey:@"washingtime"];
+    washingTime = [DateUtils formatDateStr:washingTime srcDateFormat:srcTimeFormat targetDateFormat:targetTimeFormat];
+    // 洗车完成的时间
+    NSString *finishedTime = [order objectForKey:@"finishedtime"];
+    finishedTime = [DateUtils formatDateStr:finishedTime srcDateFormat:srcTimeFormat targetDateFormat:targetTimeFormat];
+    //开始更新订单状态
+    for (int index = 0 ; index < _data.count; index++) {
+        PayDetailModel * model = [_data objectAtIndex:index];
+        if (index <= status)
+        {
+            model.status = PayDetailStatus_Finished;
+            switch (index)
+            {
+                case WashCarOrderStatus_Order_Success:
+                    model.time = orderTime;
+                    break;
+                case WashCarOrderStatus_Order_Received:
+                    model.time = receivedTime;
+                    break;
+                case WashCarOrderStatus_Order_Arrival:
+                    model.time = arrivalTime;
+                    break;
+                case WashCarOrderStatus_Order_Washing:
+                    model.time = washingTime;
+                    break;
+                case WashCarOrderStatus_Order_Finished:
+                    model.time = finishedTime;
+                    break;
+                default:
+                    break;
+            }
+        }
+        else
+        {
+            model.status = PayDetailStatus_Unfinished;
+            model.time = @"";
+        }
+    }
+    // 车辆位置
+    NSString *carPosition = [[order objectForKey:@"carposition"] trimNull];
+    _addresslb.text = carPosition;
+}
+
+#pragma mark 将视图滚动至对应的index
+-(void)scrollViewToIndex:(int)index
+{
+    
+    //1.改变图片
+    PayDetailModel *model = [_data objectAtIndex:index];
+    _orderStatusImgView.image = [UIImage imageNamed:model.statusPic];
+
+    //2.滚动动画
+    [_orderStatusTBView reloadData];
+    __weak UITableView *orderStatusTBView = _orderStatusTBView;
+    [UIView animateWithDuration:0.3f delay:0.0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+        [orderStatusTBView setContentOffset:CGPointMake(0.f, 0.f) animated:YES];
+    }
+    completion:^(BOOL finished)
+    {
+        CGFloat yOffset = firstTableCellTopViewH;
+        if (index == 0)
+        {
+            yOffset = 0;
+        }
+        [orderStatusTBView setContentOffset:CGPointMake(0.f, yOffset + tableCellItemH * index) animated:YES];
+    }];
+}
+
+
+//----------------中间视图区域-----------------------//
+#pragma mark 中间视图
+-(UIView*)centerView
+{
+    if (!_centerView)
+    {
+        //1.中间视图
+        CGFloat centerVX = 0.f;
+        CGFloat centerVY = CGRectGetMaxY(self.headView.frame) + 0.5f;
+        CGFloat centerVW = SCREEN_WIDTH;
+        CGRect  centerVFrame = Rect(centerVX, centerVY, centerVW, centerVH);
+        _centerView =  [[CustBgViewWidget alloc]initWithFrame:centerVFrame
+                                                shadowOpacity:1.f
+                                                  shadowColor:0xc3c3c3
+                                                 shadowRadius:2.f
+                                                      bgColor:0xedf0f2
+                                                 bgColorAlpha:1.0
+                                                 cornerRadius:0
+                                                shadowYOffset:1.f
+                                                shadowXOffset:0.f];
+        _centerView.backgroundColor = [UIColor clearColor];
+        
+        //2.状态图片
+        _orderStatusImgView = [[TapImageViewWidget alloc]initWithFrame:_centerView.bounds];
+        _orderStatusImgView.delegate = self;
+        _orderStatusImgView.image = [UIImage imageNamed:[NSString stringWithFormat:@"order_status_%i",WashCarOrderStatus_Order_Success]];
+        _orderStatusImgView.contentMode = UIViewContentModeScaleAspectFit;
+        [_centerView addSubview:_orderStatusImgView];
+        
+        //3.返回首页的按钮
+        _backToHomeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        CGFloat backToHomeBtnX = 10.f;
+        CGFloat backToHomeBtnY = 10.f;
+        CGFloat backToHomeBtnW = 50.f;
+        CGFloat backToHomeBtnH = 31.f;
+        CGRect  backToHomeBtnFrame = Rect(backToHomeBtnX, backToHomeBtnY, backToHomeBtnW, backToHomeBtnH);
+        _backToHomeBtn.frame = backToHomeBtnFrame;
+        [_backToHomeBtn setTitle:backToHomeBtnTitle forState:UIControlStateNormal];
+        [_backToHomeBtn setTitle:backToHomeBtnTitle forState:UIControlStateHighlighted];
+        [_backToHomeBtn setTitle:backToHomeBtnTitle forState:UIControlStateSelected];
+        [_backToHomeBtn setTitleColor:RGB_TextColor_C10 forState:UIControlStateNormal];
+        [_backToHomeBtn setTitleColor:RGB_TextColor_C10 forState:UIControlStateHighlighted];
+        [_backToHomeBtn setTitleColor:RGB_TextColor_C10 forState:UIControlStateSelected];
+        [_backToHomeBtn addTarget:self action:@selector(backToHomeBtnClicked:) forControlEvents:UIControlEventTouchUpInside];
+        _backToHomeBtn.titleLabel.font = FONT_TextSize_S8;
+        _backToHomeBtn.layer.borderColor = RGB_TextColor_C15.CGColor;
+        _backToHomeBtn.layer.borderWidth = 1;
+        _backToHomeBtn.layer.cornerRadius = 4.f;
+        _backToHomeBtn.layer.masksToBounds = YES;
+        [_centerView addSubview:_backToHomeBtn];
+    }
+    return _centerView;
+}
+
+#pragma mark TapImageViewWidgetDelegate代理方法
+-(void)imageTap:(id)sender imageView:(UIImageView*)imageView
+{
+    if (imageView == _orderStatusImgView)
+    {
+        [self postRefreshOrderStatusNotification];
+    }
+    else if(imageView == _callServiceBtn)
+    {
+        [self contactService];
+    }
+}
+
+#pragma mark 回首页按钮被点击的处理handler
+-(void)backToHomeBtnClicked:(UIButton*)btn
+{
+    [self popToRootViewController];
+}
+
+#pragma mark UITableViewDataSource 代理方法
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    return _data.count;
+}
+
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    static NSString *identifier = @"itemCellIdentifier";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
+    if (!cell)
+    {
+        cell = [[UITableViewCell alloc]initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
+        cell.backgroundColor = [UIColor clearColor];
+    }
+    //重置 UITableViewCell
+    [cell.contentView removeAllSubviews];
+    
+    PayDetailCell *cellItemView = [[PayDetailCell alloc]initWithFrame:Rect(0.f, 0.f, SCREEN_WIDTH, 0.f)
+                                                                 data:[_data objectAtIndex:indexPath.row]];
+    cell.frame = Rect(0.f, 0.f, SCREEN_WIDTH, cellItemView.frame.size.height);
+    [cell.contentView addSubview:cellItemView];
+    return cell;
+}
+
+#pragma mark UITableViewDelegate 代理方法
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath{
+    
+    if (indexPath.row == 0)
+    {
+        return tableCellItemH + firstTableCellTopViewH;
+    }
+    else if(indexPath.row == 4)
+    {
+        return tableCellItemH + lastTableCellAboveViewH;
+    }
+    else
+    {
+        return tableCellItemH;
+    }
+}
+
+
+//---------------其他-------------------//
+#pragma mark 生命周期方法--didReceiveMemoryWarning
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+}
+
+#pragma mark 方法重载
+-(BaseNaviBarWidget*)navBar
+{
+    return nil;
+}
+
+#pragma mark 移除对应的对象
+-(void)dealloc
+{
+    //1.头部视图
+    _headView = nil;
+    _addresslb = nil;  //地址
+    _callServiceBtn = nil;  //联系客服按钮
+    
+    //2.中间视图
+    _centerView = nil;
+    _orderStatusImgView = nil;
+    _backToHomeBtn = nil;
+    
+    //3.底部视图
+    _bottomView = nil;
+    _orderStatusTBView = nil;
+    
+    //5.数据对象
+    _data = nil;
+    
+    APP_DebugLog(@"%@ dealloc method was invoked",NSStringFromClass([self class]));
+}
+@end

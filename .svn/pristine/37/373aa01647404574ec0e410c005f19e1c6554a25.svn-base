@@ -1,0 +1,57 @@
+//
+//  PayIndexModel.m
+//  WashCar
+//
+//  Created by yangyixian on 15/1/12.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//   支付下单首页模型
+
+#import "PayIndexModel.h"
+
+@implementation PayIndexModel
+
+//- (instancetype)initWithDict:(NSDictionary *)dict
+//{
+//    if (self = [super init]) {
+//        self.phone = dict[@"phone"];
+//        self.carInfo = dict[@"carInfo"];
+//        self.carPosition = dict[@"carPosition"];
+//        //self.payType = dict[@"payType"];
+//        //self.vip = [dict[@"vip"] boolValue];
+//       
+//        //或者 kvc添加数据到模型中
+//        //[self setValuesForKeysWithDictionary:dict];
+//    }
+//    return self;
+//}
+//
+////构造方法
+//+ (instancetype)orderWithDict:(NSDictionary *)dict
+//{
+//    return [[self alloc] initWithDict:dict];
+//}
+//
+////设置支付方式的类型
+//- (void)setCellType:(PayType)payType
+//{
+//    _payType = payType;
+//    
+//    if (payType == kPayTypeXJ)
+//    {
+//       
+//    } else if (payType == kPayTypeZFB)
+//    {
+//        
+//    } else if (payType == kPayTypeHB)
+//    {
+//    
+//    }
+//
+//}
+//
+//-(NSString *)carInfo
+//{
+//    return [NSString stringWithFormat:@"%@%@%@",_carArea,_carAlpha,_carNum];
+//}
+//
+@end

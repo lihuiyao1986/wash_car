@@ -1,0 +1,14 @@
+//
+//  BeforeCell.h
+//  WashCar
+//
+//  Created by Cheletong on 15-1-14.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import <UIKit/UIKit.h>
+@class CarPicModel;
+
+@interface BeforeCell : UIView<UICollectionViewDataSource,UICollectionViewDelegate,UICollectionViewDelegateFlowLayout>
+- (instancetype)initWithFrame:(CGRect)frame data:(CarPicModel*)data;
+@end

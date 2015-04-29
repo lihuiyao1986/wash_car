@@ -1,0 +1,75 @@
+//
+//  HttpRequestClient.h
+//  NaChe
+//
+//  Created by yanshengli on 14-12-15.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import <Foundation/Foundation.h>
+#import "AppDelegate.h"
+#import "MyReachability.h"
+
+#pragma mark http请求响应的数据类型
+typedef NS_ENUM(NSInteger, HttpRequestDataType) {
+    json_data_type  = 0,//json类型
+    xml_data_type  = 1,//xml类型
+};
+
+#pragma mark http响应代码枚举
+typedef NS_ENUM(NSInteger, HttpRespCode) {
+    HttpRespCode_RespSuceess = 0,//响应成功
+    HttpRespCode_NOLogin  = 100,//未登录
+    HttpRespCode_LowVersion  = 200,//版本过低
+    HttpRespCode_ServerError = 500,//服务器异常
+    HttpRespCode_Bad_Resp_Format = 600,//响应的数据格式错误
+    HttpRespCode_Bad_ReqUrl = 700,//请求url无效
+    HttpRespCode_Upload_Img_Unavailable = 800,//上传图片时，图片不存在
+    HttpRespCode_No_Network_Available = 900,//网络不可用
+};
+
+#pragma mark http请求类型枚举
+typedef NS_ENUM(NSInteger, Http_Req_Type)
+{
+    Http_Req_Type_Get = 0,//响应成功
+    Http_Req_Type_Post  = 1,//未登录
+};
+
+#pragma mark 定义请求成功和失败后的回调block
+typedef void (^HttpFinishBlock)(id result,HttpRequestDataType dataType,int reqTag);
+typedef void (^UploadProgressBlock)(long long finishedBytes,long long totalBytes);
+
+#pragma mark 请求代理实体类
+@protocol HttpRequestClientDelegate <NSObject>
+@optional
+#pragma mark 请求成功后回调
+-(void)respResult:(NSDictionary*)result errorcode:(int)errorcode
+                                        errorMsg:(NSString*)errorMsg
+                                        dataType:(HttpRequestDataType)dataType
+                                        tag:(int)reqTag;
+#pragma mark 图片或者文件上传回调
+-(void)uploadProgressWithFinishedBytes:(long long)finishedBytes totalBytes:(long long)totalBytes;
+@end
+
+/**
+ *
+ *http请求实体类
+ *@since 2014-12-15
+ *@author:liys
+ */
+@interface HttpRequestClient : NSObject
+#pragma mark 代理属性
+@property (nonatomic,assign)id<HttpRequestClientDelegate>delegate;
+#pragma mark 请求完成后的回调block
+@property (nonatomic,strong)HttpFinishBlock finishBlock;
+#pragma mark 文件上传对应的block
+@property (nonatomic,strong)UploadProgressBlock uploadProBlock;
+#pragma mark 发送post请求
+-(void)doPostWithUrl:(NSString *)url params:(NSDictionary*)params dataType:(HttpRequestDataType)dataType reqTag:(int)reqTag;
+#pragma mark 发送get请求
+-(void)doGetWithUrl:(NSString *)url params:(NSDictionary*)params dataType:(HttpRequestDataType)dataType reqTag:(int)reqTag;
+#pragma mark 上传图片
+-(void)uploadImgWithUrl:(NSString *)url image:(UIImage *)image params:(NSDictionary *) params dataType:(HttpRequestDataType)dataType tag:(int)reqTag;
+#pragma mark 批量上传图片
+-(void)bacthUploadImgsWithUrl:(NSString*)url images:(NSArray*)images params:(NSDictionary *) params dataType:(HttpRequestDataType)dataType tag:(int)reqTag;
+@end

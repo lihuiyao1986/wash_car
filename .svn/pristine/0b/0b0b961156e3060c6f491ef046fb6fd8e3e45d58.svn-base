@@ -1,0 +1,763 @@
+//
+//  PayIndexController.m
+//  Washcar
+//
+//  Created by yanshengli on 14-12-25.
+//  支付首页
+//
+#import "PayIndexController.h"
+
+#import "LoginController.h"
+#import "CustBgViewWidget.h"
+#import "LocationViewController.h"
+#import "PaySelectBtnItem.h"
+#import "CarAreaKeybordWidget.h"
+#import "LineViewWidget.h"
+#import "NSString+Utility.h"
+#import "PayIndexModel.h"
+#import "AFViewShaker.h"
+#import "CustomTextField.h"
+#import "PayDetailController.h"
+
+
+#define commomX  (SCREEN_WIDTH -300)/2//默认到屏幕边框距离
+#define commomH   39//默认间隙
+#define lableX  10//默认lable到屏幕边框距离
+#define infoLableX  81//信息lable到父视图左边框距离
+#define lableY 0//默认lable到背景边框距离
+#define lableW  71//默认lable的宽度
+#define lableH  30//默认lable高度
+
+#define phoneViewH  70//手机号所在View高度
+#define carmsgViewH 113//爱车信息View高度
+#define payViewH 44 // 支付View高度
+#define btnViewH 60 // 底部按钮背景View高度
+#define kAlphaNum   @"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"//允许输入车牌号键盘输入的内容
+#define doCommitOrderTag 300//登录请求对应的tag
+
+
+
+
+@interface PayIndexController ()
+<CarAreaKeybordWidgetDelegate,UITextFieldDelegate,UIScrollViewDelegate,BMKLocationServiceDelegate,
+BMKGeoCodeSearchDelegate>
+{
+    UITextField *_phoneNumbertf;//电话号码
+    UITextField *_carPositiontf;//停车位置
+    UITextField *_carInfotf;//车牌号输入文本框
+    UITextField *_payStyletf;//支付方式
+    
+    PaySelectBtnItem *_carBtn;//车牌选择按钮1
+    PaySelectBtnItem *_carBtn2;//车牌选择按钮2
+    UIButton *_startBtn;//提交订单
+    AFViewShaker *_viewShake;//抖动视图
+
+    NSString *_phoneNumber;//手机号
+    NSString *_carArea;//车牌地区
+    NSString *_carAlpha;//车牌字母
+    NSString *_carNum;//车牌号码
+    NSString *_carInfo;//车牌号码
+    CLLocationCoordinate2D _carLocation;//车辆经纬度
+   
+    BOOL _isusePhoneNull;//表示手机号是否为空
+    BOOL _iscarPositionNull;//表示停车位置是否为空
+    BOOL _iscarNumberNull;//表示停车位置是否为空
+    
+    //地图定位service
+    BMKLocationService *_locService;
+    BMKGeoCodeSearch *_geoCodeSearch;
+
+}
+@property(nonatomic,strong) UIScrollView *mainScrollView;
+@property (nonatomic, strong) PayIndexModel *order_model;
+@end
+@implementation PayIndexController
+
+#pragma mark -----重写模型set方法---
+-(void)setOrder_model:(PayIndexModel *)order_model
+{
+    _order_model = order_model;
+    _carInfo = _order_model.carPlateNum;
+    
+    
+}
+
+#pragma mark ---  delloc
+-(void)dealloc
+{
+    //移除通知
+    [self removeNofications];
+    APP_Log(@"-------->>>>>>>下单首页通知删除了<<<<<<<-------");
+    
+}
+
+#pragma mark 生命周期方法- viewDidLoad
+-(void)viewDidLoad
+{
+    [super viewDidLoad];
+    //1.数据处理
+    [self prepareData];
+    //2搭建UI
+    [self setUPView];
+    //3.注册提交订单按钮通知
+    [self setUPNofications];
+    //4.初始化定位服务
+    [self setUPBDMapLocService];
+    }
+
+#pragma mark 生命周期方法- viewWillAppear
+-(void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    //发送通知
+    [self postNotifications];
+    //2.设置代理
+    _locService.delegate = self;
+    _geoCodeSearch.delegate = self;
+    
+    //3.开始定位//如果订单已经有位置了，就不需要定位了
+    if ([CommonUtils isStrEmpty:_carPositiontf.text]) {
+        [self beginLocate];
+    }
+}
+
+-(void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    //.释放内存
+    _locService.delegate = nil;
+    _geoCodeSearch.delegate = nil;
+}
+
+#pragma mark ----------------通知处理--------------
+-(void)setUPNofications
+{
+    //1.添加监听器
+    [self registerNofications];
+    //2.注册抖动对象
+    [self registerViewShake];
+    //3.初始化手机号为空
+    _isusePhoneNull = NO;
+    //4.初始化停车位置为空
+    _iscarPositionNull = NO;
+    //5.初始化停车位置为空
+    _iscarNumberNull = NO;
+}
+#pragma mark 添加监听器
+-(void)registerNofications
+{
+    [WashcarDefaultCenter addObserver:self selector:@selector(updatestarBtnStatus:)name:updateStarBtnStatusNotification object:nil];
+}
+#pragma mark 发送通知
+-(void)postNotifications
+{
+    [WashcarDefaultCenter postNotificationName:updateStarBtnStatusNotification object:nil];
+}
+
+#pragma mark 移除通知
+-(void)removeNofications
+{
+    [WashcarDefaultCenter removeObserver:self name:updateStarBtnStatusNotification object:nil];
+    APP_Log(@"通知移除了");
+}
+#pragma mark 注册抖动对象
+-(void)registerViewShake
+{
+    NSArray *shakeViews = [NSArray arrayWithObjects:_carInfotf, nil];
+    _viewShake = [[AFViewShaker alloc]initWithViewsArray:shakeViews];
+}
+
+#pragma mark 更新确认按钮状态的通知
+-(void)updatestarBtnStatus:(NSNotification *)notification
+{
+    //手机号
+    _phoneNumber = _phoneNumbertf.text;
+    //车牌信息
+    _carNum = _carInfotf.text;
+    //停车位置
+    NSString *carPlace  = _carPositiontf.text;
+    //支付方式
+    //NSString *pay = _payStylelb.text;
+    //设置按钮的状态
+    _startBtn.enabled =![CommonUtils isStrEmpty:_carNum] && ![CommonUtils isStrEmpty:_phoneNumber] && ![CommonUtils isStrEmpty:carPlace] ;
+}
+
+#pragma mark --------------搭建UI-------------------
+-(void)setUPView
+{
+    //滚动视图背景
+    CGFloat mainScrollViewX = 0.f;
+    CGFloat mainScrollViewY = TOP_BLANNER_HEIGHT + SCREEN_HEIGHT_START;
+    CGFloat mainScrollViewW = SCREEN_WIDTH;
+    CGFloat mainScrollViewH = SCREEN_HEIGHT - mainScrollViewY - btnViewH;
+    CGRect  mainScrollViewFrame = Rect(mainScrollViewX, mainScrollViewY, mainScrollViewW, mainScrollViewH);
+    _mainScrollView = [[UIScrollView alloc]initWithFrame:mainScrollViewFrame];
+    _mainScrollView.backgroundColor = RGB_TextColor_C3;
+    _mainScrollView.contentSize = CGSizeMake(mainScrollViewW, mainScrollViewH + 40.f);
+    _mainScrollView.showsVerticalScrollIndicator = NO;
+    _mainScrollView.delegate = self;
+    [self.view addSubview:_mainScrollView];
+    /*
+     1.0联系方式下面白色View
+    */
+    CGFloat phoneViewX = commomX;
+    CGFloat phoneViewY = commomH;
+    CGFloat phoneViewW = 300;
+    CustBgViewWidget *phoneView = [[CustBgViewWidget alloc]initWithFrame:CGRectMake(phoneViewX, phoneViewY, phoneViewW, phoneViewH)];
+    [self.mainScrollView addSubview:phoneView];
+    phoneView.backgroundColor = [UIColor whiteColor];
+    //1.1联系方式
+    CGFloat lable1X = phoneViewX;
+    CGFloat lable1Y = 19;
+    CGFloat lable1W = 300;
+    CGFloat lable1H = 13;
+    UILabel *lable1 = [[UILabel alloc]initWithFrame:CGRectMake(lable1X,lable1Y,lable1W,lable1H)];
+    lable1.text = @"联系方式";
+    lable1.textColor =RGB_TextColor_C8;
+    lable1.font =FONT_TextSize_S5;
+    lable1.backgroundColor = [UIColor clearColor];
+    [self.mainScrollView addSubview:lable1];
+
+    //1.2手机号
+    UILabel *phoneLb = [[UILabel alloc]initWithFrame:CGRectMake(lableX,lableY,lableW,44)];
+    phoneLb.text = @"手机号";
+    phoneLb.textColor = RGB_TextColor_C12;
+    phoneLb.font = FONT_TextSize_S6;
+    [phoneView addSubview:phoneLb];
+    //1.3点击输入手机号
+    _phoneNumbertf = [[UITextField alloc]initWithFrame:CGRectMake(infoLableX, lableY, phoneViewW - lableW  - 60, 44)];
+    _phoneNumbertf.placeholder = @"点击输入手机号";
+    _phoneNumbertf.text = _phoneNumber;
+    _phoneNumbertf.font = FONT_TextSize_S2;
+    _phoneNumbertf.textColor =RGB_TextColor_C11;
+    _phoneNumbertf.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    //改变placeholder字体颜色
+    [_phoneNumbertf setValue:RGB_TextColor_C8 forKeyPath:@"_placeholderLabel.textColor"];
+
+    [phoneView addSubview:_phoneNumbertf];
+    //1.4尾部小图片
+    UIImageView *phoneImgv = [[UIImageView alloc]initWithFrame:CGRectMake(phoneViewW - 16.f,16.f,6.f, 12.f)];
+    phoneImgv.image = [UIImage imageNamed:@"arrow_right_gray"];
+    phoneImgv.contentMode = UIViewContentModeScaleAspectFill;
+    [phoneView addSubview:phoneImgv];
+    //1.5跑男通过手机号联系你文字
+    CGFloat phoneMsgLbX  = lableX;
+    CGFloat phoneMsgLbY  = phoneViewH - 25;
+    CGFloat phoneMsgLbW  = SCREEN_WIDTH - 40;
+    CGFloat phoneMsgLbH  = 25;
+    UILabel *phoneMsgLb = [[UILabel alloc]initWithFrame:CGRectMake(phoneMsgLbX, phoneMsgLbY,phoneMsgLbW, phoneMsgLbH)];
+    phoneMsgLb.text = @"跑男通过手机号联系你";
+    phoneMsgLb.font = [UIFont systemFontOfSize:10];
+    phoneMsgLb.textColor = RGB_TextColor_C8;
+    [phoneView addSubview:phoneMsgLb];
+    //1.6点击事件按钮
+    CGFloat phoneBtnX  = lableW +lableX;
+    CGFloat phoneBtnY = 0;
+    CGFloat phoneBtnW  = phoneViewW - lableX- lableW;
+    CGFloat phoneBtnH = 44;
+    UIButton *phoneBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    phoneBtn.frame = CGRectMake(phoneBtnX, phoneBtnY, phoneBtnW,phoneBtnH);
+    [phoneView addSubview:phoneBtn];
+    phoneBtn.tag = 101;
+    [phoneBtn addTarget:self action:@selector(btnAction:) forControlEvents:UIControlEventTouchUpInside];
+    
+    /*
+     2.0  爱车信息下的白色View
+     */
+    CGFloat carmsgViewX  = commomX;
+    CGFloat carmsgViewY =  commomH *2 +phoneViewH;
+    CGFloat carmsgViewW = SCREEN_WIDTH - commomX*2;
+    CustBgViewWidget *carmsgView = [[CustBgViewWidget alloc]initWithFrame:CGRectMake(carmsgViewX, carmsgViewY, carmsgViewW, carmsgViewH)];
+    carmsgView.backgroundColor = [UIColor whiteColor];
+    [self.mainScrollView addSubview:carmsgView];
+
+    //2.1爱车信息
+    UILabel *lable2 =[[UILabel alloc]initWithFrame:CGRectMake(lable1X,carmsgViewY - lable1H - 7,lable1W,lable1H)];
+    lable2.backgroundColor = [UIColor clearColor];
+    lable2.text = @"爱车信息";
+    lable2.textColor =RGB_TextColor_C8;
+    lable2.font =FONT_TextSize_S5;
+    [self.mainScrollView addSubview:lable2];
+    
+    //2.2车牌号
+    UILabel *carLb = [[UILabel alloc]initWithFrame:CGRectMake(lableX,lableY,lableW,44)];
+    carLb.text = @"车牌号";
+    carLb.textColor = RGB_TextColor_C12;
+    carLb.font = FONT_TextSize_S6;
+    [carmsgView addSubview:carLb];
+    UILabel *carLb2 = [[UILabel alloc]initWithFrame:CGRectMake(lableX,carmsgViewH - 44,lableW,44)];
+    carLb2.text = @"停车位置";
+    carLb2.textColor = RGB_TextColor_C12;
+    carLb2.font = FONT_TextSize_S6;
+    [carmsgView addSubview:carLb2];
+    
+    //2.3选择车牌信息选择2个按钮和1个单行编辑文本框
+    _carBtn = [PaySelectBtnItem buttonWithType:UIButtonTypeCustom];
+    _carBtn.frame = CGRectMake(infoLableX, 0, 30, 44);
+    _carBtn.tag = 201;
+    _carBtn.titleLabel.font = FONT_TextSize_S3_Bold;
+    [_carBtn setTitle:_carArea forState:UIControlStateNormal];
+    [_carBtn setImage:[UIImage imageNamed:@"arrow_down_blue"] forState:UIControlStateNormal];
+    [_carBtn setImage:[UIImage imageNamed:@"arrow_down_blue"] forState:UIControlStateSelected];
+    [_carBtn setTitleColor:RGB_TextColor_C11 forState:UIControlStateNormal];
+    _carBtn2  = [PaySelectBtnItem buttonWithType:UIButtonTypeCustom];
+    _carBtn2.frame = CGRectMake(137, 0, 26, 44);
+    _carBtn2.tag = 202;
+    _carBtn2.titleLabel.font = FONT_TextSize_S3_Bold;
+    [_carBtn2 setTitleColor:RGB_TextColor_C11 forState:UIControlStateNormal];
+    [_carBtn2 setTitle:_carAlpha forState:UIControlStateNormal];
+    [_carBtn2 setImage:[UIImage imageNamed:@"arrow_down_blue"] forState:UIControlStateNormal];
+    [_carBtn2 setImage:[UIImage imageNamed:@"arrow_down_blue"] forState:UIControlStateSelected];
+    [_carBtn addTarget:self action:@selector(btnAction:) forControlEvents:UIControlEventTouchUpInside];
+    [_carBtn2 addTarget:self action:@selector(btnAction:) forControlEvents:UIControlEventTouchUpInside];
+    //输入车牌号文本框
+    _carInfotf = [[CustomTextField alloc]initWithFrame:CGRectMake(carmsgViewW - 110.f,0.f,110.f,44.f)];
+    _carInfotf.placeholder = @"输入车牌号";
+    _carInfotf.font = FONT_TextSize_S4_Bold;
+    _carInfotf.textColor =RGB_TextColor_C11;
+    _carInfotf.text = _carNum;
+    _carInfotf.keyboardType = UIKeyboardTypeEmailAddress;
+    _carInfotf.returnKeyType = UIReturnKeyDone;
+    _carInfotf.autocorrectionType = UITextAutocorrectionTypeNo;
+    _carInfotf.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;//一致大写
+    _carInfotf.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    _carInfotf.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+    _carInfotf.autocapitalizationType =   UITextAutocapitalizationTypeAllCharacters;
+    _carInfotf.delegate = self;
+    
+    //设置文本框左边显示的view  永远显示
+    _carInfotf.leftView = [[UIView alloc]initWithFrame:CGRectMake(0, 0, 20, 0)];
+    _carInfotf.leftViewMode = UITextFieldViewModeAlways;
+    [carmsgView addSubview:_carBtn];
+    [carmsgView addSubview:_carBtn2];
+    [carmsgView addSubview:_carInfotf];
+    
+    //2.4请输入停车位置信息
+    _carPositiontf = [[UITextField alloc]initWithFrame:CGRectMake(infoLableX, carmsgViewH - 44, phoneViewW - infoLableX - 16 , 44)];
+    _carPositiontf.placeholder  = @"请输入停车位置";
+    //改变placeholder字体颜色
+    [_carPositiontf setValue:RGB_TextColor_C8 forKeyPath:@"_placeholderLabel.textColor"];
+    //改变placeholder字体大小
+    [_carPositiontf setValue:[UIFont systemFontOfSize:13] forKeyPath:@"_placeholderLabel.font"];
+    _carPositiontf.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    _carPositiontf.textColor = RGB_TextColor_C11;
+    _carPositiontf.font = FONT_TextSize_S5;
+    [carmsgView addSubview:_carPositiontf];
+    //2.5跑男通过车牌号找到您的车辆
+    UILabel *carMsgLb = [[UILabel alloc]initWithFrame:CGRectMake(phoneMsgLbX, phoneMsgLbY-2,phoneMsgLbW, phoneMsgLbH)];
+    [carmsgView addSubview:carMsgLb];
+    carMsgLb.text = @"跑男通过车牌号找到您的车辆";
+    carMsgLb.font = [UIFont systemFontOfSize:10];
+    carMsgLb.textColor =RGB_TextColor_C8;
+    //2.6尾部小图标
+    UIImageView *carImgv = [[UIImageView alloc]initWithFrame:CGRectMake(carmsgViewW - 16.f, carmsgViewH - 28.f,6.f, 12.f)];//CGRectMake(phoneViewW - 30, lableY, 30, 44)
+    carImgv.image = [UIImage imageNamed:@"arrow_right_gray"];
+    carImgv.contentMode = UIViewContentModeScaleAspectFill;
+    [carmsgView addSubview:carImgv];
+    
+    //2.7 停车位置点击事件按钮
+    UIButton *sectionBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    sectionBtn.frame = CGRectMake(0.f, carmsgViewH - 44.f, carmsgViewW,phoneBtnH);
+    sectionBtn.tag = 203;
+    [carmsgView addSubview:sectionBtn];
+    [sectionBtn addTarget:self action:@selector(btnAction:) forControlEvents:UIControlEventTouchUpInside];
+    
+    
+
+    //**//3.0付款服务
+    CGFloat payViewX = commomX;
+    CGFloat payViewY = carmsgViewH + phoneViewH +commomH *3;
+    CGFloat payViewW = SCREEN_WIDTH - commomX*2;
+    CustBgViewWidget *payView = [[CustBgViewWidget alloc]initWithFrame:CGRectMake(payViewX, payViewY, payViewW, payViewH)];
+    payView.backgroundColor = [UIColor whiteColor];
+    [self.mainScrollView addSubview:payView];
+    //3.0付款服务
+    UILabel *lable3 = [[UILabel alloc]initWithFrame:CGRectMake(lable1X,payViewY - lable1H - 7,lable1W,lable1H)];
+    lable3.text = @"付款服务";
+    lable3.textColor =RGB_TextColor_C8;
+    lable3.font =FONT_TextSize_S5;
+    lable3.backgroundColor = [UIColor clearColor];
+
+    [self.mainScrollView addSubview:lable3];
+    //3.1支付方式
+    UILabel *payLb = [[UILabel alloc]initWithFrame:CGRectMake(lableX,lableY,lableW,44)];
+    payLb.text = @"支付方式";
+    payLb.textColor = RGB_TextColor_C12;
+    payLb.font =FONT_TextSize_S6;
+    [payView addSubview:payLb];
+    _payStyletf = [[UITextField alloc]initWithFrame:CGRectMake(infoLableX, lableY, phoneViewW - lableW  - 60, 44)];
+    _payStyletf.placeholder = @"请选择支付方式";
+    _payStyletf.text = @"红包支付";
+    [_payStyletf setValue:RGB_TextColor_C8 forKeyPath:@"_placeholderLabel.textColor"];
+    [_payStyletf setValue: [UIFont systemFontOfSize:16] forKeyPath:@"_placeholderLabel.font"];
+    _payStyletf.font = FONT_TextSize_S2;
+    _payStyletf.textColor = RGB_TextColor_C11;
+    _payStyletf.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+ 
+
+//    _payStylelb.textColor = RGB_TextColor_C8;
+    [payView addSubview:_payStyletf];
+    //3.2尾部图标
+    UIImageView *payImgv = [[UIImageView alloc]initWithFrame:CGRectMake(phoneViewW - 16.f,16.f,6.f, 12.f)];
+    payImgv.image = [UIImage imageNamed:@"arrow_right_gray"];
+    payImgv.contentMode = UIViewContentModeScaleAspectFill;
+    [payView addSubview:payImgv];
+    //3.3支付方式点击选择按钮
+    UIButton *payBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    payBtn.frame = CGRectMake(phoneBtnX, phoneBtnY, phoneBtnW,phoneBtnH);
+    payBtn.tag = 301;
+    [payView addSubview:payBtn];
+    [payBtn addTarget:self action:@selector(btnAction:) forControlEvents:UIControlEventTouchUpInside];
+    
+
+    //4.0最底部视图背景
+    CGFloat btnViewX = 0.f;
+    CGFloat btnViewY = TOP_BLANNER_HEIGHT + SCREEN_HEIGHT_START + mainScrollViewH;
+    CGFloat btnViewW = SCREEN_WIDTH;
+    CGRect btnViewWframe = CGRectMake(btnViewX,btnViewY ,btnViewW , btnViewH);
+    CustBgViewWidget *btnView = [[CustBgViewWidget alloc]initWithFrame:btnViewWframe
+                                                          shadowOpacity:0.15f
+                                                            shadowColor:0Xbbbbbb
+                                                           shadowRadius:1.5f
+                                                                bgColor:0xffffff
+                                                           cornerRadius:0.f
+                                                          shadowYOffset:-1.5f
+                                                          shadowXOffset:0.f];
+    [self.view addSubview:btnView];
+    
+    
+    //4.1马上洗车按钮
+    CGFloat startBtnX = (SCREEN_WIDTH - 250)/2;
+    CGFloat startBtnY = 8.f;
+    CGFloat startBtnW = 250.f;
+    CGFloat startBtnH = 44.f;
+    _startBtn = [CommonUtils washCarBtn:CGRectMake(startBtnX, startBtnY, startBtnW , startBtnH)];
+    _startBtn.titleLabel.font = FONT_TextSize_S3_Bold;
+    [_startBtn setTitle:@"马上洗车" forState:UIControlStateNormal];
+    [_startBtn setTitle:@"马上洗车" forState:UIControlStateHighlighted];
+    [_startBtn setTitle:@"马上洗车" forState:UIControlStateSelected];
+    [_startBtn addTarget:self action:@selector(commitBtnClicked:) forControlEvents:UIControlEventTouchUpInside];
+    [btnView addSubview:_startBtn];
+
+    //添加页面中的三个分割线
+    LineViewWidget *line1View = [[LineViewWidget alloc]initWithXoffset:10.f//到父视图的远点x方向的偏移量
+                                                               yOffset:44.f//到父视图的远点y方向的偏移量
+                                                            lineHeight:1.f//分割线高度
+                                                             lineWidth:280.f//分割线宽度
+                                                             lineColor:0xe3e2e2//分割线颜色
+                                                             lineAlpha:0.5];//分割线透明度
+    LineViewWidget *line2View = [[LineViewWidget alloc]initWithXoffset:189.f
+                                                               yOffset:4.5f
+                                                            lineHeight:37.f
+                                                             lineWidth:1.f
+                                                             lineColor:0xe3e2e2
+                                                             lineAlpha:0.5];
+    LineViewWidget *line3View = [[LineViewWidget alloc]initWithXoffset:10.f
+                                                               yOffset: phoneMsgLbY +23
+                                                            lineHeight:1.f
+                                                             lineWidth:280.f
+                                                             lineColor:0xe3e2e2
+                                                             lineAlpha:0.5];
+    [phoneView addSubview:line1View];
+    [carmsgView addSubview:line2View];
+    [carmsgView addSubview:line3View];
+    
+}
+#pragma mark --------------数据处理-------------------
+-(void)prepareData
+{
+    //1.读取账号
+    [self readAccoun];
+}
+
+#pragma mark ---------输入手机号码，停车地点，车牌号 的 点击事件处理----------
+-(void)btnAction:(UIButton *)sender
+{
+    NSInteger tag = sender.tag;
+    switch (tag) {
+        case 101:{//手机号码选择按钮
+            [self showPhoneInfo];
+            break;
+        }
+        case 201:{//省份键盘选择  -->弹出地区键盘
+            [self showCarAreaKeyBorder];
+            break;
+        }
+        case 202:{//城市键盘选择  -->弹出字母键盘
+            [self showCarAlphaKeyBorder];
+            break;
+        }
+        case 203:{//地图选择停车位置按钮 设定
+            [self showLocationInfo];
+            break;
+        }
+        case 301:{//支付方式选择
+            //[self showAlert:@"亲，已默认选择红包支付!" type:AlertViewType_Toast];
+            _payStyletf.text = @"红包支付";
+            break;
+        }
+        default:
+            break;
+    }
+    APP_Log(@"------>>>开始洗车");
+}
+//手机号码选择按钮事件处理
+-(void)showPhoneInfo
+{
+    [_carInfotf resignFirstResponder];
+    LoginController *LC = [[LoginController alloc]init];
+    [self pushViewControllerFromBottom:LC];
+    __weak UITextField *phone1 = _phoneNumbertf;
+    LC.sucessCallBack = ^(NSString *mobileno,NSMutableDictionary *userinfo){
+        phone1.text = mobileno;
+        _isusePhoneNull = YES;
+    };
+}
+//省份键盘选择  -->弹出地区键盘
+-(void)showCarAreaKeyBorder
+{
+    [_carInfotf resignFirstResponder];
+    __weak UIButton *carBtn = _carBtn;
+    CarAreaKeybordWidget *areaKeyBorder = [[CarAreaKeybordWidget alloc]initWithType:CarAreaKeyBorderType_Area];
+    areaKeyBorder.selectedBlock = ^(NSString *item){
+        [carBtn setTitle:item forState:UIControlStateNormal];
+        _carArea = item;
+    };
+    
+    [areaKeyBorder show];
+}
+//城市键盘选择  -->弹出字母键盘
+-(void)showCarAlphaKeyBorder
+{
+    [_carInfotf resignFirstResponder];
+    CarAreaKeybordWidget *areaKeyBorder = [[CarAreaKeybordWidget alloc]initWithType:CarAreaKeyBorderType_Alpha];
+    __weak UIButton *carBtn2 = _carBtn2;
+    areaKeyBorder.selectedBlock = ^(NSString *item){
+        [carBtn2 setTitle:item forState:UIControlStateNormal];
+        _carAlpha = item;
+    };
+    APP_Log( @"______%@__________",_carAlpha);
+
+    [areaKeyBorder show];
+}
+//选择停车位置按钮 设定
+-(void)showLocationInfo
+{
+    LocationViewController *LVC = [[LocationViewController alloc]init];
+    [self pushViewControllerFromBottom:LVC];
+    __weak UITextField *carPositionInfo = _carPositiontf;
+    __weak PayIndexController *payVC = self;
+    LVC.pageCallBack = ^(NSString* carLocationAddress,CLLocationCoordinate2D coordinate,NSDictionary* info){
+        carPositionInfo.text = carLocationAddress;
+        _carLocation = coordinate;
+        [payVC postNotifications];
+    };
+}
+
+
+#pragma mark --------提交订单按钮的点击事件----------
+-(void)commitBtnClicked:(UIButton *)sender
+{
+    if ([self carInfoRight] && [self carLocationRight])
+    {
+        //存储手机号车牌号
+        [self saveAccoun];
+        
+        APP_Log(@"-----%@----------%@-------%@",_carArea,_carAlpha,_carNum);
+        APP_Log(@"提交成功");
+    }
+}
+-(void)readAccoun
+{
+    
+    if (_order_model == nil) {
+        _order_model = [UserDefaults objectForKey:@"_order_model"];
+    }
+    _carAlpha =[UserDefaults objectForKey:@"carAlpha"];
+    _carArea = [UserDefaults objectForKey:@"carArea"];
+    _carNum =[UserDefaults objectForKey:@"carNum"];
+    _phoneNumber =[UserDefaults objectForKey:@"phone"];
+    
+    if (_carAlpha == nil || _carArea == nil ||_phoneNumber ==nil) {
+        _carArea = @"浙";
+        _carAlpha = @"A";
+    }
+    APP_Log(@"...........取缓存...........\n%@  %@ %@ %@",_phoneNumber,_carArea,_carAlpha,_carNum);
+}
+//属性列表存储手机号车牌号 ----
+-(void)saveAccoun
+{
+  
+    NSString *carPlateNum = [NSString stringWithFormat:@"%@%@%@",_carArea,_carAlpha,_carNum];
+    NSString *address = [_carPositiontf.text trimNull];
+    CLLocationDegrees carLongitude = _carLocation.longitude;
+    CLLocationDegrees carLatitude = _carLocation.latitude;
+    
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:carPlateNum,@"carPlateNum",address,@"address", nil];
+    
+    dispatch_queue_t q = dispatch_queue_create("CommitOrder", DISPATCH_QUEUE_CONCURRENT);
+    dispatch_async(q, ^{
+        [self doPost:placeOrderUrl params:params tag:doCommitOrderTag];
+        NSLog(@"当前线程为%@ ", [NSThread currentThread]);
+    });
+
+
+    APP_Log(@"提交订单%@---%@---%f---%f",carPlateNum,address,carLongitude,carLatitude);
+    
+}
+#pragma mark ----提交订单成功回调----
+-(void) handleRespResult:(NSDictionary*)result tag:(int)reqTag
+{
+    if (reqTag == doCommitOrderTag)
+    {
+        // 1.存储数据
+        //    _order_model.phone = _phoneNumbertf.text;
+        //    _order_model.carAlpha = _carAlpha;
+        //    _order_model.carArea = _carArea;
+        //    _order_model.carNum = _carInfotf.text;
+        //    [UserDefaults setObject:_order_model forKey:@"_order_model"];
+        NSString *phoneNunber11 = _phoneNumbertf.text;
+        
+        [UserDefaults setObject:phoneNunber11 forKey:@"phone"];
+        [UserDefaults setObject:_carArea forKey:@"carArea"];
+        [UserDefaults setObject:_carAlpha forKey:@"carAlpha"];
+        [UserDefaults setObject:_carNum  forKey:@"carNum"];
+        //马上同步
+        [UserDefaults synchronize];
+        APP_Log(@"----------保存 ----------\n%@  %@%@%@",phoneNunber11,_carArea,_carAlpha,_carNum);
+        PayDetailController *payView = [[PayDetailController alloc]init];
+        [self pushViewControllerFromBottom:payView];
+    }
+    
+}
+
+//检验车牌号是否合法
+-(BOOL)carInfoRight
+{
+   // _carInfoTF.text
+    if (![_carInfotf.text isValidCarNumber] || !(_carInfotf.text.length ==5)){
+        [self showAlert:@"亲，填写的车牌号不符合要求哦!" type:AlertViewType_Toast];
+        return NO;
+    }
+    return YES;
+}
+//判断定位是否是否成功方法
+-(BOOL)carLocationRight
+{
+    NSString *carPlace = _carPositiontf.text;//停车位置
+    if ([CommonUtils isStrEmpty:carPlace] ) {
+        [self showAlert:@"亲，停车位置不符合规范哦!" type:AlertViewType_Toast];
+        return NO;
+    }
+    return YES;
+}
+
+#pragma mark----------------------输入车牌号码键盘代理方法---------------------
+// 车牌号码输入处理    只能输入5位数，只能是数字和字母
+- (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string
+{
+    //车牌号不能超过5位
+    if (textField == _carInfotf && range.location > 4)
+    {
+        return NO;
+    }
+    //判断只能输入大写字母和数字
+    NSCharacterSet *cs;
+    cs = [[NSCharacterSet characterSetWithCharactersInString:kAlphaNum] invertedSet];
+    NSString *filtered =[[string componentsSeparatedByCharactersInSet:cs] componentsJoinedByString:@""];
+    BOOL basic = [string isEqualToString:filtered];
+    return basic;
+    //return YES;
+}
+- (void)textFieldDidBeginEditing:(UITextField *)textField
+{
+    //键盘弹出方式自定义
+    [self moveView:textField leaveView:NO];
+}
+- (void)textFieldDidEndEditing:(UITextField *)textField
+{
+    //键盘消失的方式自定义
+    [self moveView:textField leaveView:YES];
+    _carNum = _carInfotf.text;
+    [self postNotifications];
+    
+}
+- (BOOL)textFieldShouldReturn:(UITextField *)textField
+{
+    [_carInfotf resignFirstResponder];
+    [self moveView:_carInfotf leaveView:YES];
+    [self postNotifications];
+    return YES;
+}
+
+#pragma mark ---------------------初始化百度地图定位的service-----------
+-(void)setUPBDMapLocService
+{
+    _locService = [[BMKLocationService alloc]init];
+    _geoCodeSearch = [[BMKGeoCodeSearch alloc]init];
+}
+#pragma mark BMKLocationServiceDelegate代理方法
+- (void)didUpdateUserLocation:(BMKUserLocation *)userLocation
+{
+    if (userLocation != nil){
+        //创建反地理编码
+        BMKReverseGeoCodeOption* reverseGeoCodeOption = [[BMKReverseGeoCodeOption alloc] init];
+        reverseGeoCodeOption.reverseGeoPoint = userLocation.location.coordinate;
+        //
+        _carLocation = userLocation.location.coordinate;
+        
+        //开始反地理编码
+        [_geoCodeSearch reverseGeoCode:reverseGeoCodeOption];
+        //停止定位
+        [self stopLocate];
+    }
+    else{
+        [self stopLocate];
+        _carPositiontf.text = @"获取地址失败";
+    }
+}
+
+- (void)didFailToLocateUserWithError:(NSError *)error
+{
+    _carPositiontf.text = @"获取地址失败";
+    [self stopLocate];
+}
+
+#pragma mark - BMKGeoCodeSearchDelegate代理方法
+- (void)onGetReverseGeoCodeResult:(BMKGeoCodeSearch *)searcher result:(BMKReverseGeoCodeResult *)result errorCode:(BMKSearchErrorCode)error
+{
+    if (!error){
+        _carPositiontf.text = result.address;
+        [self postNotifications];
+    }
+    else{
+        _carPositiontf.text = @"获取地址失败";
+    }
+}
+
+#pragma mark 开始定位
+-(void)beginLocate
+{
+    [_locService startUserLocationService];
+}
+
+#pragma mark 停止定位
+-(void)stopLocate
+{
+    [_locService stopUserLocationService];
+}
+
+
+
+#pragma mark -------获取导航栏信息-----------
+-(NavBarInfoModel*)navBarInfo{
+    NavBarInfoModel *navBarInfo = [[NavBarInfoModel alloc]init];
+    navBarInfo.navCenterTitle = @"上门洗车";
+    return navBarInfo;
+}
+-(BOOL)needAddPanGesture{
+    return NO;
+}
+
+
+@end

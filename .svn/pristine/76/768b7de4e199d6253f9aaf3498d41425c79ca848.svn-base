@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="format-detection" content="telephone=no" />
+        <meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height, target-densitydpi=device-dpi" />
+        <link rel="stylesheet" type="text/css" href="../../css/jquery.mobile-1.4.5.min.css" />
+        <title>首页</title>
+        <script type="text/javascript" src="../../js/jquery1.9.1.js"></script>
+        <script type="text/javascript" src="../../js/jquery.mobile-1.4.5.min.js"></script>
+        <script type="text/javascript">
+            $(function(){
+                    $("#clickBtn").bind("tap",function(){
+                        alert("dddd");
+                        //$.doAlert("温馨提示","你点击了按钮","toast",printInfo,null,null);
+                        //$.doHttpReq("user/login","10","name=1");
+                        $.popToPage("index/index.html","name=1","web");
+                    });
+            });
+            
+            $.extend({
+                doAlert:function(title,message,success,fail,type){//弹出框
+                     var url = "invokeMethod://doAlert?title=" + (title || "") + "&message=" + (message || "") + "&type=" + (type || "toast");
+                     window.location.href = encodeURI(url);
+                },
+                doHttpReq:function(reqUrl,reqTag,params){//发送http请求
+                     //params ＝ params || "";
+                     var url = "invokeMethod://doHttpReq?reqTag = " + (reqTag || "0") + "& url=" + reqUrl + "&" + params;
+                     window.location.href = encodeURI(url);
+                },
+                popToPage: function(startPage,params,type){//页面跳转
+                     //type = type || "native";
+                     var url = "popToPage:// " + type + "?startPage = " + startPage + "&" + params;
+                     alert(url);
+                     window.location.href = encodeURI(url);
+                }
+            });
+            
+            function printInfo(data){
+                return "12333";
+            }
+        
+            /***
+             * 该函数为http请求成功后的回调函数
+             * data -- 请求成功后的数据
+             * reqTag -- 请求的标识
+             */
+            function httpSuccCallback(data,reqTag){
+                alert(data);
+            }
+        
+            /***
+              * 该函数为http请求失败后的回调函数
+              * message -- 失败的错误描述
+              * errorCode -- 错误码
+              * reqTag -- 请求的tag
+            */
+            function httpFailCallback(message,errorCode,reqTag){
+                $.doAlert("错误提示",message,null,null,"alert");
+            }
+        </script>
+    </head>
+    <body>
+        <div data-role="page" id="pageone">
+            <div data-role="content">
+                <h2>列表分隔符</h2>
+                <ul data-role="listview">
+                    <li data-role="list-divider">欧洲</li>
+                    <li><a href="#">德国</a></li>
+                    <li><a href="#">英国</a></li>
+                    <li data-role="list-divider">亚洲</li>
+                    <li><a href="#">中国</a></li>
+                    <li><a href="#">印度</a></li>
+                    <li data-role="list-divider">非洲</li>
+                    <li><a href="#">埃及</a></li>
+                    <li><a href="#">南非</a></li>
+                </ul>
+            </div>
+        </div>
+    </body>
+</html>
+<!--<script type="text/javascript" src="cordova.js"></script>-->
+
+
+

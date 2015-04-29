@@ -1,0 +1,432 @@
+//
+//  SqliteHelper.m
+//  email:shiming209@qq.com
+//
+//  Created by apple on 13-6-26.
+//  Copyright (c) 2013年 apple. All rights reserved.
+//
+
+
+#define dbFilename  @"neche.sql"
+
+//缓存10分钟
+#define CACHE_MINIUTE 10
+
+
+////////////////////////////////////
+
+#define SQL_CREATE_PAGE "create table if not exists page_json(page INTEGER,json text,insertTime char(14))"
+#define SQL_SELECT_PAGE "select json from page_json where page=?"
+#define SQL_SELECT_PAGE_Expired "select count(*) as c from page_json where page=? and insertTime>=?"
+#define SQL_DEL_ALL_PAGE "delete from page_json where page!=?"
+#define SQL_DEL_PAGE "delete from page_json where page=?"
+#define SQL_INSERT_PAGE "insert into page_json(page,json,insertTime)values(?,?,?)"
+
+////////////////////////////////////
+#import "SqliteHelper.h"
+
+@implementation SqliteHelper
+
+@synthesize _database;
+
+-(void) createTables{
+    [self createTable:self._database sql:SQL_CREATE_PAGE];
+    
+    sqlite3_close(_database);
+    
+}
+
+
+
+-(NSString *) getNow{
+    NSDate *date=[NSDate date];
+    NSDateFormatter  *dateformatter=[[NSDateFormatter alloc] init];
+    [dateformatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+    NSString *nowStr=[dateformatter stringFromDate:date];
+    return nowStr;
+}
+
+-(NSString *) getNowNum{
+    NSDate *date=[NSDate date];
+    NSDateFormatter  *dateformatter=[[NSDateFormatter alloc] init];
+    [dateformatter setDateFormat:@"yyyyMMddHHmmss"];
+    NSString *nowStr=[dateformatter stringFromDate:date];
+    return nowStr;
+}
+
+-(NSString *) getTimeBefore:(int)miniute{
+    NSDate *date=[NSDate date];
+    NSDateFormatter  *dateformatter=[[NSDateFormatter alloc] init];
+    //NSTimeInterval  interval = 24*60*60*1; //1:天数
+    NSTimeInterval  interval = 60*miniute;
+    NSDate *date1 = [date initWithTimeIntervalSinceNow:-interval];
+    [dateformatter setDateFormat:@"yyyyMMddHHmmss"];
+    NSString *nowStr=[dateformatter stringFromDate:date1];
+    return nowStr;
+}
+
+
+//获取document目录并返回数据库目录
+- (NSString *)dataFilePath{
+	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+	NSString *documentsDirectory = [paths objectAtIndex:0];
+	return [documentsDirectory stringByAppendingPathComponent:dbFilename];
+	
+}
+
+//创建，打开数据库
+- (BOOL)openDB:(char *)sql {
+	
+	//获取数据库路径
+	NSString *path = [self dataFilePath];
+	//文件管理器
+	NSFileManager *fileManager = [NSFileManager defaultManager];
+	//判断数据库是否存在
+	BOOL find = [fileManager fileExistsAtPath:path];
+	
+	//如果数据库存在，则用sqlite3_open直接打开（不要担心，如果数据库不存在sqlite3_open会自动创建）
+	if (find) {
+		//打开数据库，这里的[path UTF8String]是将NSString转换为C字符串，因为SQLite3是采用可移植的C(而不是
+		//Objective-C)编写的，它不知道什么是NSString.
+		if(sqlite3_open([path UTF8String], &_database) != SQLITE_OK) {
+            //如果打开数据库失败则关闭数据库
+			sqlite3_close(self._database);
+            //			DLog(@"Error: open database file.");
+			return NO;
+		}
+		
+		//创建一个新表
+        [self createTable:self._database sql:sql];
+        
+		return YES;
+	}
+	//如果发现数据库不存在则利用sqlite3_open创建数据库（上面已经提到过），与上面相同，路径要转换为C字符串
+	if(sqlite3_open([path UTF8String], &_database) == SQLITE_OK) {
+		
+		//创建一个新表
+        [self createTable:self._database sql:sql];
+        sqlite3_close(self._database);
+		return YES;
+    } else {
+		//如果创建并打开数据库失败则关闭数据库
+		sqlite3_close(self._database);
+		return NO;
+    }
+	return NO;
+}
+
+
+//创建表
+- (BOOL) createTable:(sqlite3*)db sql:(char *)sql{
+	
+	sqlite3_stmt *statement;
+	//sqlite3_prepare_v2 接口把一条SQL语句解析到statement结构里去. 使用该接口访问数据库是当前比较好的的一种方法
+	NSInteger sqlReturn = sqlite3_prepare_v2(_database, sql, -1, &statement, nil);
+	
+	//如果SQL语句解析出错的话程序返回
+	if(sqlReturn != SQLITE_OK) {
+		return NO;
+	}
+	
+	//执行SQL语句
+	int success = sqlite3_step(statement);
+	//释放sqlite3_stmt
+	sqlite3_finalize(statement);
+	
+	//执行SQL语句失败
+	if ( success != SQLITE_DONE) {
+		return NO;
+	}
+	return YES;
+}
+
+
+////////////////////////////////////////////////
+//首页并不清除
+-(BOOL) cleanPageJson{
+    
+	//先判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return NO;
+    }
+	sqlite3_stmt *statement;
+    
+    int success2 = sqlite3_prepare_v2(_database, SQL_DEL_ALL_PAGE, -1, &statement, NULL);
+    if (success2 != SQLITE_OK) {
+        sqlite3_close(_database);
+        return NO;
+    }
+    sqlite3_bind_int(statement, 1, PAGE_INDEX);
+    //执行插入语句
+    success2 = sqlite3_step(statement);
+    //释放statement
+    sqlite3_finalize(statement);
+    
+    //关闭数据库
+    sqlite3_close(_database);
+    //如果删除失败
+    if (success2 == SQLITE_ERROR) {
+        return NO;
+    }
+    return YES;
+}
+
+-(BOOL) removePageJson:(int)page{
+
+    //先判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return NO;
+    }
+	sqlite3_stmt *statement;
+    
+    //sql语句
+    int success2 = sqlite3_prepare_v2(_database, SQL_DEL_PAGE, -1, &statement, NULL);
+    if (success2 != SQLITE_OK) {
+        sqlite3_close(_database);
+        return NO;
+    }
+    
+    sqlite3_bind_int(statement, 1, page);
+    
+    success2 = sqlite3_step(statement);
+    //释放statement
+    sqlite3_finalize(statement);
+    
+    //关闭数据库
+    sqlite3_close(_database);
+    //如果删除失败
+    if (success2 == SQLITE_ERROR) {
+        return NO;
+    }
+    return YES;
+}
+
+
+-(BOOL) pageJsonExpired:(int)page{
+
+	//判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return YES;
+    }
+	sqlite3_stmt *statement;
+    
+    if (sqlite3_prepare_v2(_database, SQL_SELECT_PAGE_Expired, -1, &statement, NULL) != SQLITE_OK) {
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return YES;
+    }
+    sqlite3_bind_int(statement, 1, page);
+    NSString *beforeMiniute=[self getTimeBefore:CACHE_MINIUTE];
+    sqlite3_bind_text(statement, 2, [beforeMiniute UTF8String], -1, SQLITE_TRANSIENT);
+    
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        int count=sqlite3_column_int(statement, 0);
+        if(count == 0 ){
+            sqlite3_finalize(statement);
+            sqlite3_close(_database);
+            return YES;
+        }
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return NO;
+    }else{
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return YES;
+    }
+}
+
+-(NSDictionary *) getJsonData:(int)page{
+    
+	//判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return nil;
+    }
+	sqlite3_stmt *statement;
+    
+    if (sqlite3_prepare_v2(_database, SQL_SELECT_PAGE, -1, &statement, NULL) != SQLITE_OK) {
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return nil;
+    }
+    sqlite3_bind_int(statement, 1, page);
+    
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        char* jsonvarchar   = (char*)sqlite3_column_text(statement, 0);
+        if(jsonvarchar == nil ){
+            sqlite3_finalize(statement);
+            sqlite3_close(_database);
+            return nil;
+        }        
+        NSString *json=[NSString stringWithUTF8String:jsonvarchar];
+        
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        if(json==nil||json.length==0){
+            return nil;
+        }
+        
+        NSData *tmpdata= [json dataUsingEncoding: NSUTF8StringEncoding];
+        
+        NSError *error;
+        NSDictionary *dict=[NSJSONSerialization JSONObjectWithData:tmpdata options:NSJSONReadingAllowFragments error:&error];
+
+        //NSLog(@"-----dict:%@",dict);
+        return dict;
+    }else{
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return nil;
+    }
+}
+
+-(NSArray *) getJsonListData:(int)page{
+    
+	//判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return nil;
+    }
+	sqlite3_stmt *statement;
+    
+    if (sqlite3_prepare_v2(_database, SQL_SELECT_PAGE, -1, &statement, NULL) != SQLITE_OK) {
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return nil;
+    }
+    sqlite3_bind_int(statement, 1, page);
+    
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        char* jsonvarchar   = (char*)sqlite3_column_text(statement, 0);
+        if(jsonvarchar == nil ){
+            sqlite3_finalize(statement);
+            sqlite3_close(_database);
+            return nil;
+        }
+        NSString *json=[NSString stringWithUTF8String:jsonvarchar];
+        
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        if(json==nil||json.length==0){
+            return nil;
+        }
+        
+        NSData *tmpdata= [json dataUsingEncoding: NSUTF8StringEncoding];
+        
+        NSError *error;
+        NSArray *dict=[NSJSONSerialization JSONObjectWithData:tmpdata options:NSJSONReadingAllowFragments error:&error];
+        
+        //NSLog(@"-----dict:%@",dict);
+        return dict;
+    }else{
+        sqlite3_finalize(statement);
+        sqlite3_close(_database);
+        return nil;
+    }
+}
+
+-(BOOL) insertPageJson:(NSDictionary *)jsondict page:(int)page{
+    
+    //先判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return NO;
+    }
+	sqlite3_stmt *statement;
+    
+    //sql语句
+    int success2 = sqlite3_prepare_v2(_database, SQL_DEL_PAGE, -1, &statement, NULL);
+    if (success2 != SQLITE_OK) {
+        sqlite3_close(_database);
+        return NO;
+    }
+    
+    sqlite3_bind_int(statement, 1, page);
+    
+    //执行插入语句
+    success2 = sqlite3_step(statement);
+    //释放statement
+    sqlite3_finalize(statement);
+    
+    NSError *error = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:jsondict options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *json=[[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    
+    //NSLog(@"----page:%d json:%@",page,json);
+    success2 = sqlite3_prepare_v2(_database, SQL_INSERT_PAGE, -1, &statement, NULL);
+    if (success2 != SQLITE_OK) {
+        sqlite3_close(_database);
+        return NO;
+    }
+    
+    sqlite3_bind_int(statement, 1, page);
+    sqlite3_bind_text(statement, 2, [json UTF8String], -1, SQLITE_TRANSIENT);
+    NSString *now=[self getNowNum];
+    sqlite3_bind_text(statement, 3, [now UTF8String], -1, SQLITE_TRANSIENT);
+    //执行插入语句
+    success2 = sqlite3_step(statement);
+    //释放statement
+    sqlite3_finalize(statement);
+    
+    //关闭数据库
+    sqlite3_close(_database);
+    //如果插入失败
+    if (success2 == SQLITE_ERROR) {
+        return NO;
+    }
+    return YES;
+}
+
+-(BOOL) insertPageListJson:(NSArray *)jsondict page:(int)page{
+    
+    //先判断数据库是否打开
+    if (![self openDB:SQL_CREATE_PAGE]) {
+        return NO;
+    }
+	sqlite3_stmt *statement;
+    
+    //sql语句
+    int success2 = sqlite3_prepare_v2(_database, SQL_DEL_PAGE, -1, &statement, NULL);
+    if (success2 != SQLITE_OK) {
+        sqlite3_close(_database);
+        return NO;
+    }
+    
+    sqlite3_bind_int(statement, 1, page);
+    
+    //执行插入语句
+    success2 = sqlite3_step(statement);
+    //释放statement
+    sqlite3_finalize(statement);
+    
+    NSError *error = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:jsondict options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *json=[[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    
+    //NSLog(@"----page:%d json:%@",page,json);
+    success2 = sqlite3_prepare_v2(_database, SQL_INSERT_PAGE, -1, &statement, NULL);
+    if (success2 != SQLITE_OK) {
+        sqlite3_close(_database);
+        return NO;
+    }
+    
+    sqlite3_bind_int(statement, 1, page);
+    sqlite3_bind_text(statement, 2, [json UTF8String], -1, SQLITE_TRANSIENT);
+    NSString *now=[self getNowNum];
+    sqlite3_bind_text(statement, 3, [now UTF8String], -1, SQLITE_TRANSIENT);
+    //执行插入语句
+    success2 = sqlite3_step(statement);
+    //释放statement
+    sqlite3_finalize(statement);
+    
+    //关闭数据库
+    sqlite3_close(_database);
+    //如果插入失败
+    if (success2 == SQLITE_ERROR) {
+        return NO;
+    }
+    return YES;
+}
+////////////////////////////////////////////////
+
+
+
+@end

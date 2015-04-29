@@ -1,0 +1,185 @@
+//
+//  BeforeViewController.m
+//  WashCar
+//
+//  Created by Cheletong on 15-1-14.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "BeforeViewController.h"
+#import "LineViewWidget.h"
+#import "BeforeCell.h"
+#import "UIView+WashCarUtility.h"
+#import "CarPicModel.h"
+#define VIEW_Y TOP_BLANNER_HEIGHT+SCREEN_HEIGHT_START+39
+@interface BeforeViewController ()
+{
+    UITableView*CarTableView;
+    NSMutableArray *_data;
+}
+@end
+
+@implementation BeforeViewController
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    [self navBarInfo];
+    self.view.backgroundColor=RGB_TextColor_C5;
+    CarTableView=[[UITableView alloc]initWithFrame:CGRectMake(0.f, VIEW_Y, SCREEN_WIDTH,ScreenHeight-VIEW_Y-125) style:UITableViewStylePlain];
+  
+    CarTableView.delegate=self;
+    CarTableView.dataSource=self;
+    CarTableView.backgroundColor = [UIColor clearColor];
+    CarTableView.showsVerticalScrollIndicator = NO;
+    CarTableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    [self.view addSubview:CarTableView];
+    
+    [self initData];
+    
+    UILabel*TipLabel=[[UILabel alloc]initWithFrame:CGRectMake(10,VIEW_Y-30 , SCREEN_WIDTH-20, 30)];
+   TipLabel.textColor=RGB_TextColor_C8;
+    TipLabel.text=@"检查洗车前照片,有问题可联系客服";
+   TipLabel.font=[UIFont systemFontOfSize:13];
+   [self.view addSubview:TipLabel];
+     
+//    UIView*view=[[UIView alloc]initWithFrame:CGRectMake(10, VIEW_Y,SCREEN_WIDTH-20,119)];
+//    view.backgroundColor=[UIColor  whiteColor];
+//    [self.view addSubview:view];
+//    UILabel*CarLabel=[[UILabel alloc]initWithFrame:CGRectMake(10,0,260,43)];
+//    CarLabel.text=@"左前头划痕";
+//    CarLabel.textColor=hexColor(0x66aad9, 1);
+//    CarLabel.font=FONT_TextSize_S3;
+//    [view addSubview:CarLabel];
+//    
+//    UIImageView*CarImage1=[[UIImageView alloc]init];
+//    CarImage1.backgroundColor=RGB_TextColor_C5;
+//    CarImage1.frame=CGRectMake(10, 53, 65, 57);
+//    [view addSubview:CarImage1];
+    
+//      LineViewWidget *line3View = [[LineViewWidget alloc]initWithXoffset:10.f
+//                                                                   yOffset:44
+//                                                                lineHeight:1.f
+//                                                                 lineWidth:280.f
+//                                                                 lineColor:0xe3e2e2
+//                                                                 lineAlpha:1];
+//    [CarTableView addSubview:line3View];
+// Do any additional setup after loading the view.
+}
+
+-(void)initData
+{
+    _data = [NSMutableArray array];
+    
+    CarPicModel *model1 = [[CarPicModel alloc]init];
+    model1.title = @"左前车头划痕";
+    model1.pics = [NSArray arrayWithObjects:@"1.png",@"1.png",@"1.png",@"1.png",@"1.png",@"1.png", nil];
+    
+    CarPicModel *model2 = [[CarPicModel alloc]init];
+    model2.title = @"左前门划痕";
+    model2.pics = [NSArray arrayWithObjects:@"1.png",@"1.png",@"1.png",@"1.png", nil];
+    
+    CarPicModel *model3 = [[CarPicModel alloc]init];
+    model3.title = @"右前车头划痕";
+    model3.pics = [NSArray arrayWithObjects:@"1.png",@"1.png",@"1.png",@"1.png",@"1.png",@"1.png", nil];
+    CarPicModel *model4 = [[CarPicModel alloc]init];
+    model4.title = @"右前门划痕";
+    model4.pics = [NSArray arrayWithObjects:@"1.png",@"1.png",@"1.png", nil];
+
+    CarPicModel *model5 = [[CarPicModel alloc]init];
+    model5.title = @"顶部划痕";
+    model5.pics = [NSArray arrayWithObjects:@"1.png",@"1.png",@"1.png",@"1.png",@"1.png", nil];
+    
+    _data = [NSMutableArray arrayWithObjects:model1,model2,model3,model4,model5, nil];
+    
+//    [_data addObject:model1];
+//    [_data addObject:model2];
+//    [_data addObject:model3];
+//    [_data addObject:model4];
+//    [_data addObject:model5];
+
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    
+    NSString* identifier = @"id";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
+    if (!cell)
+    {
+        cell = [[UITableViewCell alloc]initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
+        cell.backgroundColor = [UIColor clearColor];
+    }
+    //重置 UITableViewCell
+    [cell.contentView removeAllSubviews];
+    
+    BeforeCell*beforeCell = [[BeforeCell alloc]initWithFrame:Rect(0.f, 0.f, SCREEN_WIDTH,0.f) data:[_data objectAtIndex:indexPath.row]];
+    cell.frame = Rect(0.f, 0.f, SCREEN_WIDTH, beforeCell.frame.size.height);
+    [cell.contentView addSubview:beforeCell];
+    
+    
+    //不让选中tableview
+    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+     return cell;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    UITableViewCell *Cell = [self tableView:tableView cellForRowAtIndexPath:indexPath];
+    
+    
+    return Cell.frame.size.height;
+
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    return _data.count;
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+    return 1;
+}
+
+//- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
+//{
+//    if (section == 0)
+//    {
+//        return 0;
+//    }
+//    else
+//    {
+//    return 14;
+//    }
+//    
+//}
+//
+//- (UIView *) tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
+//{
+//    
+//    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CarTableView.bounds.size.width,14)];
+//  headerView.backgroundColor=RGB_TextColor_C3;
+//    return headerView;
+//}
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    
+}
+#pragma mark 导航栏处理
+-(NavBarInfoModel*)navBarInfo{
+    NavBarInfoModel *navBarInfo = [[NavBarInfoModel alloc]init];
+    navBarInfo.navCenterTitle = @"洗车前照片";
+    return navBarInfo;
+}
+
+/*
+#pragma mark - Navigation
+
+// In a storyboard-based application, you will often want to do a little preparation before navigation
+- (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender {
+    // Get the new view controller using [segue destinationViewController].
+    // Pass the selected object to the new view controller.
+}
+*/
+
+@end

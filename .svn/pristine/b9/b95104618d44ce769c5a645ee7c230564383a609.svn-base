@@ -1,0 +1,55 @@
+//
+//  PayIndexModel.m
+//  WashCar
+//
+//  Created by yangyixian on 15/1/12.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//   支付下单首页模型
+
+#import "PayIndexModel.h"
+
+@implementation PayIndexModel
+
+- (instancetype)initWithDict:(NSDictionary *)dict
+{
+    if (self = [super init]) {
+        self.carId = dict[@"carId"];
+        self.address = dict[@"hisAddrContent"];
+        self.carPlateNum = dict[@"carPlateNum"];
+        self.userPhone = dict[@"userAccount"];
+        
+//        carId = 10001;
+//        carPlateNum = "\U6d59A12345";
+//        hisAddrContent = "\U5723\U82d1\U5317\U885715\U53f7\U95e8\U53e3";
+//        hisAddrId = 10002;
+//        userAccount = 13965899969;
+//        userEncrypt = encrypt;
+//        userId = 1;
+//        userName = "";
+//        userNickName = "";
+//        userUuid = uuid;
+    }
+    return self;
+}
+//构造方法
++ (instancetype)orderWithDict:(NSDictionary *)dict
+{
+    return [[self alloc] initWithDict:dict];
+}
+
+
+-(NSString *)carArea
+{
+    return  [_carPlateNum substringToIndex:1];
+}
+-(NSString *)carAlpha
+{
+    return  [_carPlateNum substringWithRange:NSMakeRange(1, 1)];
+}
+-(NSString *)carNum
+{
+    return  [_carPlateNum substringFromIndex:2];
+}
+
+
+@end

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="viewport"
+	content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<meta name="format-detection" content="telephone=no" />
+<meta name="format-detection" content="email=no" />
+<title>历史申请查询</title>
+</head>
+
+<body >
+	<div m-role="page">
+		<div m-role="UITableView" id="tableview">
+			<dl id="applyList">
+			</dl>
+		</div>
+		<div m-role="split"></div>
+		<div m-role="UITableView" m-style="grouped" style="display:none" id="noResult">
+			<div m-role="UITableView"  >
+              <dl>
+             <dd  m-selectionstyle="no">
+                    <div m-role="cell" m-mode="y" m-layout="fit" m-padding="1 0 1 0" >
+                       <div m-role="cell" m-margin="1 0 0 0" m-align="center"><img src="../css/themes/xyqqfund/images/list-nodata.png" alt="" width="160"/></div>
+                       <div m-role="cell" m-padding="0 0 1 0" m-align="center" class="m-font-max m-font-bold e-bottomline">没有交易记录</div>
+                      <div m-role="cell"  m-margin="1 0 1 0" m-align="center" class="m-font-big">请您更换查询时间或业务类型后重新查询</div>
+                     </div>
+             </dd>
+           
+          </dl>
+          </div>
+		 <div m-role="split"></div>
+         <div m-role="UIButton"  m-layout="fit" m-style="style-1"  id="comfirmBtn" >确认</div>
+		</div>
+		<div m-role="split"></div>
+  		<div m-role="UIButton" m-layout="fit" m-style="style-1"  id="moreButton" style="display:none">显示更多...</div>
+  		<div m-role="split"></div>
+	</div>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+

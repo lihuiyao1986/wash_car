@@ -1,0 +1,83 @@
+//
+//  CarAreaKeybordWidget.h
+//  WashCar
+//
+//  Created by yanshengli on 15-1-7.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import <UIKit/UIKit.h>
+
+typedef void(^CarAreaSelectedBlock)(NSString *item);
+typedef void(^CarAreaCanceledBlock)(void);
+typedef void(^CarAreaDismissedBlock)(void);
+
+#pragma mark http请求响应的数据类型
+typedef NS_ENUM(NSInteger, CarAreaKeyBorderType) {
+    CarAreaKeyBorderType_Area = 0,//地区
+    CarAreaKeyBorderType_Alpha = 1,//字母
+};
+
+#pragma mark 代理
+@protocol  CarAreaKeybordWidgetDelegate<NSObject>
+
+@optional
+#pragma mark 点击取消按钮
+-(void)carAreaPickViewCancelBtnClicked:(UIButton*)cancelBtn;
+
+#pragma mark 已经选择了区域
+-(void)carAreaSelected:(NSString*)carArea;
+
+@end
+
+/***
+ *
+ *@description:选择车牌地区的pickview--接口
+ *@author:liys
+ *@since:2014-1-6
+ *@corp:cheletong
+ */
+@interface CarAreaKeybordWidget : UIView
+{
+    //toolbar
+    UIView *_toolBar;
+    //选择的区域
+    NSString *_selectedItem;
+    //提示文字
+    UILabel *_titlelb;
+    //取消按钮
+    UIButton *_cancelBtn;
+    //确认按钮
+    UIButton *_confirmBtn;
+    //存放contentview
+    UICollectionView *_contentView;
+}
+
+#pragma mark 初始化方法
+- (instancetype)initWithType:(CarAreaKeyBorderType)type;
+
+#pragma mark 地区数组
+@property (nonatomic,strong)NSArray *items;
+
+#pragma mark 标题
+@property (nonatomic,copy)NSString *title;
+
+#pragma mark 取消按钮的标题
+@property (nonatomic,copy)NSString *cancelBtnTitle;
+
+#pragma mark 代理属性
+@property (nonatomic,weak)id<CarAreaKeybordWidgetDelegate>delegate;
+
+#pragma mark 取消回调
+@property (nonatomic,copy)CarAreaCanceledBlock canceledBlock;
+
+#pragma mark 选中回调
+@property (nonatomic,copy)CarAreaSelectedBlock selectedBlock;
+
+#pragma mark 窗体消失回调
+@property (nonatomic,copy)CarAreaDismissedBlock dismissedBlock;
+
+#pragma mark 显示方法
+-(void)show;
+
+@end

@@ -1,0 +1,104 @@
+//
+//  BaseWebviewControl.h
+//  WashCar
+//
+//  Created by yanshengli on 14-12-20.
+//  Copyright (c) 2014年 cheletong. All rights reserved.
+//
+#import "WebViewParam.h"
+#import "MBProgressHUD.h"
+#import "BaseNaviBarWidget.h"
+#import "AppDelegate.h"
+#import "HttpRequestClient.h"
+
+/***
+ *
+ *@description:加载webview的控制器类
+ *@author:liys
+ *@since:2014-12-25
+ *@corp:cheletong
+ */
+@interface BaseWebviewController : UIViewController
+{
+    MBProgressHUD *_HUD;
+    HttpRequestClient *_httpClient;
+    UIWebView *_webView;
+    NSString *_startPage;
+    BOOL isloading;//是否正在网络请求中
+}
+
+#pragma mark 属性
+@property (nonatomic,assign) BOOL showErrWithToast;//显示的方式
+@property (nonatomic,strong,readonly) HttpRequestClient *httpClient;
+@property (nonatomic,strong) WebViewParam *webViewParams;
+@property (nonatomic,strong,readonly) UIWebView *webView;
+@property (nonatomic,copy,readonly) NSString *startPage;
+@property (nonatomic,copy)NSString *wwwFolderName;
+
+//~~~~~~~~~~~页面回退相关~~~~~~~~~//
+#pragma 返回上一页
+- (void)gotoBack:(UIButton *)sender;
+
+#pragma mark - 自上而下推进视图控制器的动画效果
+- (void)pushViewControllerFromTop:(UIViewController *)viewController;
+
+#pragma mark - 自上而下推出视图控制器的动画效果
+- (void)popViewControllerFromTop;
+
+#pragma mark - 自下而上推进视图控制器的动画效果
+- (void)pushViewControllerFromBottom:(UIViewController *)viewController;
+
+#pragma mark - 自下而上推出视图控制器的动画效果
+- (void)popViewControllerFromBottom;
+
+#pragma mark 自左而右的推进视图控制器
+-(void)pushViewControllerFromLeft:(UIViewController*)viewController;
+
+#pragma mark 自左而右的推出视图控制器
+-(void)popViewControllerFromLeft;
+
+#pragma mark 自右而左的推进视图控制器
+-(void)pushViewControllerFromRight:(UIViewController*)viewController;
+
+#pragma mark 自左而右的推出视图控制器
+-(void)popViewControllerFromRight;
+
+//~~~~~~~~~~~导航相关~~~~~~~~~//
+#pragma 获取导航栏
+-(BaseNaviBarWidget*)navBar;
+
+//~~~~~~~~~~~手势相关~~~~~~~~~~~~~~~~//
+#pragma mark 处理Swipe手势
+-(void) handleSwipeGesture:(UISwipeGestureRecognizer *)gesture;
+
+#pragma mark 处理Tap手势
+-(void) handleTapGesture:(UITapGestureRecognizer *)gesture;
+
+#pragma mark 处理pan手势情况
+-(void) handlePanGesture:(UIPanGestureRecognizer*)gesture;
+
+#pragma mark 是否需要添加TapGesture
+-(BOOL) needAddTapGesture;
+
+#pragma mark 是否需要添加PanGesture
+-(BOOL) needAddPanGesture;
+
+#pragma mark 是否需要添加SwipeGesture
+-(BOOL) needAddSwipeGesture;
+
+//~~~~~~~~~~~~~弹框~~~~~~~~~~~~~~~~~~~~//
+#pragma mark 显示消息框
+-(void)showAlert:(NSString*)title message:(NSString*)message type:(AlertViewType)type;
+
+//~~~~~~~~~~~~~从图库中获取照片或者是拍摄相关的处理方法~~~~~~~~~~~~~~~~//
+#pragma mark 是否有拍照的权限
+-(BOOL)hasAvAuthority;
+
+#pragma mark 从相机或者相册中获取图片
+-(void)pickImages:(NSString*)title;
+
+#pragma mark 处理获取到的图片--(子类覆盖)
+-(void)handlePickImage:(UIImage*)image;
+
+@end
+

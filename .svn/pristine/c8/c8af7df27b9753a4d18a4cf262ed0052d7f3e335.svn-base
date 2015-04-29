@@ -1,0 +1,912 @@
+//
+//  LocationViewController.m
+//  WashCar
+//
+//  Created by Cheletong on 15-1-7.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "LocationViewController.h"
+#import "NavBarInfoModel.h"
+#import "CarlocationModel.h"
+#import "CarlocationDao.h"
+#import "LocationCacheModel.h"
+#import "LocationCacheCell.h"
+#import "NSString+Utility.h"
+#import "NSString+Extension.h"
+#import "UIView+WashCarUtility.h"
+
+#define SYSTEM_VERSION_LESS_THAN(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedAscending)
+
+#define MYBUNDLE_NAME @ "mapapi.bundle"
+#define MYBUNDLE_PATH [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent: MYBUNDLE_NAME]
+#define MYBUNDLE [NSBundle bundleWithPath: MYBUNDLE_PATH]
+
+#define MAP_DELTA_DETAIL 0.00185
+#define MAP_DELTA_GENERAL 0.005
+
+BOOL isReti = FALSE;
+
+@interface RouteAnnotation : BMKPointAnnotation
+{
+    int _type; ///<0:起点 1：终点 2：公交 3：地铁 4:驾乘
+    int _degree;
+}
+
+@property (nonatomic) int type;
+@property (nonatomic) int degree;
+@end
+
+@implementation RouteAnnotation
+
+@synthesize type = _type;
+@synthesize degree = _degree;
+@end
+
+@interface UIImage(InternalMethod)
+
+- (UIImage*)imageRotatedByDegrees:(CGFloat)degrees;
+
+@end
+
+@implementation UIImage(InternalMethod)
+
+- (UIImage*)imageRotatedByDegrees:(CGFloat)degrees
+{
+    CGSize rotatedSize = self.size;
+    if (isReti) {
+        rotatedSize.width *= 2;
+        rotatedSize.height *= 2;
+    }
+    UIGraphicsBeginImageContext(rotatedSize);
+    CGContextRef bitmap = UIGraphicsGetCurrentContext();
+    CGContextTranslateCTM(bitmap, rotatedSize.width/2, rotatedSize.height/2);
+    CGContextRotateCTM(bitmap, degrees * M_PI / 180);
+    CGContextRotateCTM(bitmap, M_PI);
+    CGContextScaleCTM(bitmap, -1.0, 1.0);
+    CGContextDrawImage(bitmap, CGRectMake(-rotatedSize.width/2, -rotatedSize.height/2, rotatedSize.width, rotatedSize.height), self.CGImage);
+    UIImage* newImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return newImage;
+}
+
+@end
+
+@interface LocationViewController () <BMKMapViewDelegate,BMKRouteSearchDelegate,BMKLocationServiceDelegate,BMKGeoCodeSearchDelegate,UISearchBarDelegate,UITableViewDataSource,UITableViewDelegate>
+{
+    BMKMapView* _mapView;  // 百度地图
+    
+    BMKLocationService* _locationSeveice; // 定位
+    
+    BMKGeoCodeSearch* _geoCodeSearch; // 反地理编码
+    
+    CLLocationCoordinate2D _pt;  // 定位所在经纬度
+    
+    BMKCoordinateSpan _mapSpan; // 经纬度范围
+    
+    UIButton* _btnSearch;  // 搜索按钮
+    
+    UISearchBar* _searchBar; // 搜索栏
+    
+    UIView* _headView; // 头部搜索栏View
+    
+    NSMutableArray* _arrayLocationCache; // 地址缓存
+    
+    UITableView* _tableView; // 表格视图
+    
+    NSString* _locationCity; // 定位所在城市
+    
+    NSString* _locationAddress; // 定位具体位置
+    
+    UIButton* _btnLocationCenter; // 地图标注
+    
+    UILabel* _lbLocationCenter; // 冒泡显示地址
+    
+    UIImageView* _locationCenterBottomImg; // 冒泡底部三角
+    
+    UIImageView* _locationCenterRinghtImg; // 冒泡右边选择标识
+    
+    UIImageView* _locationAddressBgImgView; // 冒泡背景图
+    
+    UIView* _locationView; // 冒泡view
+    
+    NSInteger _count; // 定位失败后继续定位次数
+}
+@end
+//背景的阴影颜色
+#define bgViewShadowColor hexColor(0x878787,1.0).CGColor
+//背景的阴影偏移量
+#define bgViewShadowOffset CGSizeMake(0.f,1.f)
+//背景的阴影的透明度
+#define bgViewShadowOpacity 0.5
+//背景的阴影半径
+#define bgViewShadowRadius 1.f
+
+#define headViewX          0
+#define headViewY          CGRectGetMaxY(self.navBar.frame)
+#define headViewW          ScreenWidth
+#define headViewH          44
+#define searchBarX          10
+#define searchBarY          5
+#define searchBarW          ScreenWidth * 5 / 6
+#define searchBarH          30
+#define cacheViewX          0
+#define cacheViewY          CGRectGetMaxY(_headView.frame)
+#define cacheViewW          ScreenWidth
+#define cacheViewH          0
+
+#define searchBarPlaceholder    @"请输入地址"
+
+@implementation LocationViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    // 初始化数据
+    [self setupData];
+    
+    // 搭建UI
+    [self drawUIView];
+}
+
+#pragma mark - 数据初始化
+- (void) setupData
+{
+    _arrayLocationCache = [NSMutableArray array];
+    
+//    _mapSpan.latitudeDelta = 0.00370239356445623;
+//    _mapSpan.longitudeDelta = 0.0029644081829189872;
+    
+    _count = 5;
+}
+
+#pragma mark - 搭建UI控件
+- (void) drawUIView
+{
+    // 1.顶部view
+    _headView = [[UIView alloc] init];
+    _headView.frame = CGRectMake(headViewX, headViewY, headViewW, headViewH);
+    _headView.backgroundColor = hexColor(0xf9f9f9, 1);
+    [self.view addSubview:_headView];
+    
+    // 1.1分割线
+    UIImageView* line = [[UIImageView alloc] init];
+    line.frame = CGRectMake(0, 43.5, headViewW, 1);
+    line.image = [UIImage imageNamed:@"line.png"];
+    [_headView addSubview:line];
+    
+    // 1.2搜索栏
+    _searchBar = [[UISearchBar alloc]initWithFrame:CGRectMake(searchBarX, searchBarY, searchBarW , searchBarH)];
+    _searchBar.barStyle = UIBarStyleDefault;
+    _searchBar.delegate = self;
+    _searchBar.placeholder = searchBarPlaceholder;
+    if (PRE_IOS7)
+    {
+        [[_searchBar.subviews objectAtIndex:0] removeFromSuperview];
+    }
+    else
+    {
+        [(UIView*)([((UIView*)[_searchBar.subviews objectAtIndex:0]).subviews objectAtIndex:0]) removeFromSuperview];
+    }
+    [_headView addSubview:_searchBar];
+    
+    // 1.3搜索按钮
+    _btnSearch = [UIButton buttonWithType:UIButtonTypeCustom];
+    _btnSearch.frame = CGRectMake(CGRectGetMaxX(_searchBar.frame) - 8, searchBarY,ScreenWidth - searchBarW, searchBarH);
+    [_btnSearch setTitle:@"搜索" forState:UIControlStateNormal];
+    [_btnSearch setTitleColor:hexColor(0x4d9bd1, 1.f) forState:UIControlStateNormal];
+    _btnSearch.titleLabel.font = [UIFont systemFontOfSize:15];
+    _btnSearch.tag = 1;
+    _btnSearch.backgroundColor = [UIColor clearColor];
+    [_btnSearch addTarget:self action:@selector(btnClicked:) forControlEvents:UIControlEventTouchUpInside];
+    [_headView addSubview:_btnSearch];
+    
+    // 2.基础地图
+    _mapView = [[BMKMapView alloc] initWithFrame:CGRectMake(0, CGRectGetMaxY(_headView.frame), ScreenWidth, ScreenHeight - CGRectGetMaxY(_headView.frame))];
+    [self.view addSubview:_mapView];
+    
+    // 3.地图标注
+    _btnLocationCenter = [UIButton buttonWithType:UIButtonTypeCustom];
+    _btnLocationCenter.frame = CGRectMake(0, 0, 25, 34);
+    _btnLocationCenter.center = CGPointMake(_mapView.frame.size.width / 2, (_mapView.frame.size.height) / 2 + CGRectGetMaxY(_headView.frame) - 15);
+    [_btnLocationCenter setImage:[UIImage imageNamed:@"myLocationP"] forState:UIControlStateNormal];
+    _btnLocationCenter.hidden = YES;
+    [self.view addSubview:_btnLocationCenter];
+    
+    // 4.冒泡view
+    _locationView = [[UIView alloc] init];
+    _locationView.frame = CGRectMake(0, 0, 100, 38 + 11);
+    _locationView.center = CGPointMake(_mapView.frame.size.width / 2, (_mapView.frame.size.height) / 2 + CGRectGetMaxY(_headView.frame) - 15 - 45);
+    _locationView.userInteractionEnabled = YES;
+    _locationView.backgroundColor = [UIColor clearColor];
+    _locationView.hidden = YES;
+    [self.view addSubview:_locationView];
+    
+    UITapGestureRecognizer* tapOne = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapOneAct)];
+    [_locationView addGestureRecognizer:tapOne];
+    
+    // 4.1地址显示背景
+    UIImage* img = [UIImage imageNamed:@"addressBgView"];
+//    img = [img resizableImageWithCapInsets:UIEdgeInsetsMake(.5, .5, .5, .5) resizingMode:0];
+    _locationAddressBgImgView = [[UIImageView alloc] initWithImage:img];
+    _locationAddressBgImgView.frame = CGRectMake(0, 0, 200, 38);
+    [_locationView addSubview:_locationAddressBgImgView];
+    
+    // 4.1.1地址显示
+    _lbLocationCenter = [[UILabel alloc] init];
+    _lbLocationCenter.frame = CGRectMake(10, 0, 100, 38);
+    _lbLocationCenter.numberOfLines = 1;
+    _lbLocationCenter.text = @"搜索中...";
+    _lbLocationCenter.font = [UIFont systemFontOfSize:13];
+    _lbLocationCenter.textColor = hexColor(0x66aad9, 1);
+    _lbLocationCenter.backgroundColor = [UIColor clearColor];
+    _lbLocationCenter.hidden = YES;
+    [_locationAddressBgImgView addSubview:_lbLocationCenter];
+    
+    // 4.2底部小三角
+    _locationCenterBottomImg = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"addressButtom.png"]];
+    _locationCenterBottomImg.frame = CGRectMake(_locationView.frame.size.width/2 - _locationCenterBottomImg.frame.size.width/2, CGRectGetMaxY(_locationAddressBgImgView.frame) - 1, 18, 11);
+    [_locationView addSubview:_locationCenterBottomImg];
+    
+    // 4.3右部选择提示框
+    _locationCenterRinghtImg = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"addressRight.png"]];
+    _locationCenterRinghtImg.frame = CGRectMake(CGRectGetMaxX(_locationAddressBgImgView.frame) - 25, 13, 6, 12);
+    [_locationView addSubview:_locationCenterRinghtImg];
+    
+    // 5.表格视图
+    _tableView = [[UITableView alloc] initWithFrame:CGRectMake(cacheViewX, cacheViewY, cacheViewW, cacheViewH) style:UITableViewStylePlain];
+    _tableView.delegate = self;
+    _tableView.dataSource = self;
+    _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    [self.view addSubview:_tableView];
+    
+    // 6.百度地图相关初始化
+    _locationSeveice = [[BMKLocationService alloc] init];
+    _geoCodeSearch = [[BMKGeoCodeSearch alloc] init];
+}
+
+#pragma mark - 点击事件
+- (void) btnClicked:(UIButton*) sender
+{
+    [_searchBar resignFirstResponder];
+    _tableView.hidden = YES;
+    NSInteger tag = sender.tag;
+    switch (tag)
+    {
+            // 搜索按钮点击
+        case 1:
+        {
+            APP_DebugLog(@"searchBtnClicked");
+            
+            // 开始正地理编码
+            [self startGeoCodeSearch:_searchBar.text];
+            
+            // 缓存本地
+            [self cacheToLocal:_searchBar.text];
+            
+            break;
+        }
+            
+        default:
+            break;
+    }
+}
+
+- (void) tapOneAct
+{
+    // 冒泡点击
+    [self gotoBack:nil];
+}
+
+#pragma mark - 缓存到本地
+- (void) cacheToLocal:(NSString*) str
+{
+    if([str isEqualToString:@""])
+    {
+        return;
+    }
+    
+    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
+    
+    dispatch_async(queue, ^{
+        
+        CarlocationModel* carlocationModel = [[CarlocationModel alloc]init];
+        CarlocationDao* carlocationDao = [[CarlocationDao alloc] init];
+        
+        BOOL flag = [carlocationDao addressExists:str];
+        if (flag)
+        {
+            if ([carlocationDao updateAddress:str])
+            {
+                APP_DebugLog(@"缓存成功");
+            }
+            else
+            {
+                APP_DebugLog(@"缓存失败");
+            }
+            return;
+        }
+        
+        carlocationModel.carLocationAddress = str;
+        carlocationModel.createTime = [DateUtils nowForString];
+        carlocationModel.modifyTime = [DateUtils nowForString];
+        [carlocationDao saveCarlocation:carlocationModel];
+    });
+}
+
+#pragma mark 从本地读取缓存
+- (void) loadCahceFromLocal
+{
+    CarlocationDao* carlocationDao = [[CarlocationDao alloc] init];
+    NSArray* arr = [carlocationDao queryCarlocation:@"select * from CarlocationModel" conditions:nil];
+    arr = [carlocationDao queryCarlocationByTime];
+    
+    // 无缓存return
+    if (![arr count])
+    {
+        return;
+    }
+    
+    // 有缓存显示
+    [self showCarLocationCache:arr];
+    
+    APP_DebugLog(@"%@",arr);
+    APP_DebugLog(@"columns is ----- %@",[carlocationDao tableColumnsByClass:[CarlocationModel class]]);
+}
+
+#pragma mark - 缓存的显示
+- (void) showCarLocationCache:(NSArray*) arr
+{
+    [_arrayLocationCache removeAllObjects];
+    
+    for (NSDictionary* dic in arr)
+    {
+        LocationCacheModel* model = [[LocationCacheModel alloc] initWithDic:dic];
+        [_arrayLocationCache addObject:model];
+    }
+    
+    //    int cellCount = (int)(ScreenHeight - CGRectGetMaxY(_headView.frame)) / 41;
+    
+    if ([_arrayLocationCache count] >= 5)
+    {
+        _tableView.frame = CGRectMake(_tableView.frame.origin.x, _tableView.frame.origin.y, _tableView.frame.size.width, 41 * 5);
+        _tableView.scrollEnabled = YES;
+    }
+    else
+    {
+        _tableView.frame = CGRectMake(_tableView.frame.origin.x, _tableView.frame.origin.y, _tableView.frame.size.width, 41 * [_arrayLocationCache count]);
+        _tableView.scrollEnabled = YES;
+    }
+    
+    [_tableView reloadData];
+}
+
+#pragma mark - 开始定位
+- (void) startLocation
+{
+    if ([self locationServicesIsOpen])
+    {
+        // 开始定位
+        [_locationSeveice startUserLocationService];
+        
+        // 先关闭定位图层
+        _mapView.showsUserLocation = NO;
+        
+        // 设置定位模式
+        _mapView.userTrackingMode = BMKUserTrackingModeNone;
+        
+        // 再打开定位图层
+        _mapView.showsUserLocation = YES;
+    }
+}
+
+#pragma mark - 开始正地理编码
+- (void) startGeoCodeSearch:(NSString*) address
+{
+    // 添加搜索信息
+    BMKGeoCodeSearchOption* option = [[BMKGeoCodeSearchOption alloc] init];
+    option.city = _locationCity;
+    option.address = address;
+    
+    // 正地理编码
+    BOOL flag = [_geoCodeSearch geoCode:option];
+    
+    if (flag)
+    {
+        APP_DebugLog(@"正向geo检索发送成功 - %@ - %@",option.city,option.address);
+        [_locationSeveice stopUserLocationService];
+    }
+    else
+    {
+        APP_DebugLog(@"正向geo检索发送失败 - %@ - %@",option.city,option.address);
+        _count --;
+        APP_DebugLog(@"count = %d",_count);
+        if (_count <= 0)
+        {
+            [_locationSeveice stopUserLocationService];
+        }
+    }
+}
+
+#pragma mark  开始反地理编码
+- (void) startReverseGeoCodeSearch:(CLLocationCoordinate2D) coordinate
+{
+    // 添加搜索信息
+    BMKReverseGeoCodeOption* reverseGeoCodeOption = [[BMKReverseGeoCodeOption alloc] init];
+    reverseGeoCodeOption.reverseGeoPoint = coordinate;
+    
+    // 反地理编码
+    BOOL flag = [_geoCodeSearch reverseGeoCode:reverseGeoCodeOption];
+    
+    if (flag)
+    {
+        APP_DebugLog(@"反geo检索发送成功");
+        [_locationSeveice stopUserLocationService];
+    }
+    else
+    {
+        APP_DebugLog(@"反geo检索发送失败");
+        _count --;
+        APP_DebugLog(@"count = %d",_count);
+        if (_count <= 0)
+        {
+            [_locationSeveice stopUserLocationService];
+        }
+    }
+}
+
+#pragma mark - 判断是否改变了经纬度
+- (BOOL) didChangeLocation:(CLLocationCoordinate2D)centerCoordinate
+{
+    // 取小数点后四位来判断是否移动位置
+    // 百度地图存在误差,经纬度精确到小数点后七位不利于判断
+    float latitude = centerCoordinate.latitude;
+    float longitude = centerCoordinate.longitude;
+    char buf[10];
+    sprintf(buf, "%.4f", latitude);
+    sscanf(buf, "%f", &latitude);
+    sprintf(buf, "%.4f", longitude);
+    sscanf(buf, "%f", &longitude);
+    
+    float ptlatitude = _pt.latitude;
+    float ptlongitude = _pt.longitude;
+    char ptbuf[10];
+    sprintf(ptbuf, "%.4f", ptlatitude);
+    sscanf(ptbuf, "%f", &ptlatitude);
+    sprintf(ptbuf, "%.4f", ptlongitude);
+    sscanf(ptbuf, "%f", &ptlongitude);
+    
+    return ((ptlatitude == latitude) && (ptlongitude == longitude)) ? NO:YES;
+}
+
+#pragma mark - 是否改变了经纬度范围
+- (BOOL) didChangeSpan:(BMKCoordinateSpan) span
+{
+    // 取小数点后四位来判断是否移动位置
+    // 百度地图存在误差,经纬度精确到小数点后七位不利于判断
+    float latitude = span.latitudeDelta;
+    float longitude = span.longitudeDelta;
+    char buf[10];
+    sprintf(buf, "%.4f", latitude);
+    sscanf(buf, "%f", &latitude);
+    sprintf(buf, "%.4f", longitude);
+    sscanf(buf, "%f", &longitude);
+    
+    float ptlatitude = _mapSpan.latitudeDelta;
+    float ptlongitude = _mapSpan.longitudeDelta;
+    char ptbuf[10];
+    sprintf(ptbuf, "%.4f", ptlatitude);
+    sscanf(ptbuf, "%f", &ptlatitude);
+    sprintf(ptbuf, "%.4f", ptlongitude);
+    sscanf(ptbuf, "%f", &ptlongitude);
+    
+    return ((ptlatitude == latitude) && (ptlongitude == longitude)) ? NO:YES;
+}
+
+#pragma mark - 更新位置frame
+- (void) updateLocationViewFrame:(NSString*)address
+{
+    _lbLocationCenter.text = address;
+    
+    float width = [_lbLocationCenter.text widthForStrWithFontSize:[UIFont systemFontOfSize:15] andHeight:38];
+    
+    if (width > ScreenWidth * 3/4)
+    {
+        width = ScreenWidth * 3/4;
+    }
+    
+    CGFloat lbLocationCenterX = _lbLocationCenter.frame.origin.x;
+    CGFloat lbLocationCenterY = _lbLocationCenter.frame.origin.y;
+    CGFloat lbLocationCenterW = width;
+    CGFloat lbLocationCenterH = _lbLocationCenter.frame.size.height;
+    _lbLocationCenter.frame = CGRectMake(lbLocationCenterX, lbLocationCenterY, lbLocationCenterW,lbLocationCenterH);
+    
+    CGFloat locationViewX = _locationView.frame.origin.x;
+    CGFloat locationViewY = _locationView.frame.origin.y;
+    CGFloat locationViewW = _lbLocationCenter.frame.size.width+20 + 10;
+    CGFloat locationViewH = _locationView.frame.size.height;
+    _locationView.frame = CGRectMake(locationViewX, locationViewY, locationViewW, locationViewH);
+    _locationView.center = CGPointMake(_mapView.frame.size.width / 2, (_mapView.frame.size.height) / 2 + CGRectGetMaxY(_headView.frame) - 15 - 45);
+    
+    CGFloat locationAddressX = _locationAddressBgImgView.frame.origin.x;
+    CGFloat locationAddressY = _locationAddressBgImgView.frame.origin.y;
+    CGFloat locationAddressW = _locationView.frame.size.width;
+    CGFloat locationAddressH = _locationAddressBgImgView.frame.size.height;
+    _locationAddressBgImgView.frame = CGRectMake(locationAddressX, locationAddressY, locationAddressW, locationAddressH);
+    
+    CGFloat CenterBottomImgX = _locationView.frame.size.width/2 - _locationCenterBottomImg.frame.size.width/2;
+    CGFloat CenterBottomImgY = _locationCenterBottomImg.frame.origin.y;
+    CGFloat CenterBottomImgW = _locationCenterBottomImg.frame.size.width;
+    CGFloat CenterBottomImgH = _locationCenterBottomImg.frame.size.height;
+    _locationCenterBottomImg.frame = CGRectMake(CenterBottomImgX, CenterBottomImgY, CenterBottomImgW, CenterBottomImgH);
+    
+    CGFloat CenterRinghtImgX = width + 10;
+    CGFloat CenterRinghtImgY = _locationCenterRinghtImg.frame.origin.y;
+    CGFloat CenterRinghtImgW = _locationCenterRinghtImg.frame.size.width;
+    CGFloat CenterRinghtImgH = _locationCenterRinghtImg.frame.size.height;
+    _locationCenterRinghtImg.frame = CGRectMake(CenterRinghtImgX, CenterRinghtImgY, CenterRinghtImgW, CenterRinghtImgH);
+}
+
+#pragma mark - tableViewDelegate
+- (NSInteger) tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+    return [_arrayLocationCache count];
+}
+
+- (CGFloat) tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    return 41;
+}
+
+- (UITableViewCell*) tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSString* ID = @"id";
+    LocationCacheCell* cell = [tableView dequeueReusableCellWithIdentifier:ID];
+    if (cell == nil)
+    {
+        cell = [[LocationCacheCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:ID];
+    }
+    
+    // cell赋值
+    cell.model = [_arrayLocationCache objectAtIndex:indexPath.row];
+    
+    // cell点击背景
+    UIView* bgView = [[UIView alloc] init];
+    bgView.backgroundColor = [UIColor grayColor];
+    cell.selectedBackgroundView = bgView;
+    
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    // 取到地址
+    _searchBar.text = [[_arrayLocationCache objectAtIndex:indexPath.row] modelAddress];
+    
+    // 正地理编码
+    [self startGeoCodeSearch:_searchBar.text];
+    
+    // 缓存
+    [self cacheToLocal:_searchBar.text];
+    
+    _tableView.hidden = YES;
+    [_searchBar resignFirstResponder];
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView
+{
+    [_searchBar resignFirstResponder];
+}
+
+#pragma mark - searchBardelegate
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar
+{
+    _tableView.hidden = NO;
+    
+    if ([searchBar.text isEqualToString:@""])
+    {
+        // 取缓存数据
+        [self loadCahceFromLocal];
+    }
+}
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
+{
+    APP_DebugLog(@"%@",searchText);
+    if ([searchBar.text isEqualToString:@""])
+    {
+        // 取缓存数据
+        [self loadCahceFromLocal];
+        return;
+    }
+    
+    // 地址搜索联想
+    NSString *url = @"http://api.map.baidu.com/place/search";
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:searchText,@"query",_locationCity,@"region",@"json",@"output",baiduMapKey,@"key",nil];
+    HttpRequestClient* client = [[HttpRequestClient alloc] init];
+    client.finishBlock = ^(id result,HttpRequestDataType dataType,int reqTag){
+        APP_DebugLog(@"result - %@",result);
+        
+        [_arrayLocationCache removeAllObjects];
+        
+//        int cellCount = (int)(ScreenHeight - CGRectGetMaxY(_headView.frame)) / 41;
+        
+        NSArray* arr = [result objectForKey:@"results"];
+        for (NSDictionary* dic in arr) {
+            LocationCacheModel* model = [[LocationCacheModel alloc] initWithDicFromBaiduApi:dic];
+            [_arrayLocationCache addObject:model];
+        }
+        
+        if ([_arrayLocationCache count] >= 5)
+        {
+            _tableView.frame = CGRectMake(_tableView.frame.origin.x, _tableView.frame.origin.y, _tableView.frame.size.width, 41 * 5);
+            _tableView.scrollEnabled = YES;
+        }
+        else
+        {
+            _tableView.frame = CGRectMake(_tableView.frame.origin.x, _tableView.frame.origin.y, _tableView.frame.size.width, 41 * [_arrayLocationCache count]);
+            _tableView.scrollEnabled = YES;
+        }
+        
+        [_tableView reloadData];
+    };
+    [client doGetWithUrl:url params:params dataType:json_data_type reqTag:100];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar
+{
+    // 开始正地理编码
+    [self startGeoCodeSearch:_searchBar.text];
+    
+    // 缓存本地
+    [self cacheToLocal:_searchBar.text];
+    
+    _tableView.hidden = YES;
+    
+    [_searchBar resignFirstResponder];
+}
+
+#pragma mark - BaiduDelegate
+#pragma 点击地图回调
+- (void)mapView:(BMKMapView *)mapView onClickedMapBlank:(CLLocationCoordinate2D)coordinate
+{
+    APP_DebugLog(@"onClickedMapBlank --- latitude:%f,longitude:%f",coordinate.latitude,coordinate.longitude);
+    
+    // 隐藏缓存数据图
+    _tableView.hidden = YES;
+    
+    if ([_searchBar isFirstResponder])
+    {
+        [_searchBar resignFirstResponder];
+        return;
+    }
+}
+
+/*
+#pragma mark  滑动标注回调
+- (void)mapView:(BMKMapView *)mapView annotationView:(BMKAnnotationView *)view didChangeDragState:(BMKAnnotationViewDragState)newState fromOldState:(BMKAnnotationViewDragState)oldState
+{
+    APP_DebugLog(@"latitude - %f, longitude - %f",view.annotation.coordinate.latitude,view.annotation.coordinate.longitude);
+    
+    BMKPointAnnotation* annotation = view.annotation;
+    annotation.coordinate = view.annotation.coordinate;
+    annotation.title = view.annotation.title;
+    annotation.subtitle = view.annotation.subtitle;
+    [_mapView addAnnotation:annotation];
+}
+*/
+
+#pragma 移动地图回调
+- (void)mapView:(BMKMapView *)mapView regionWillChangeAnimated:(BOOL)animated
+{
+    CLLocationCoordinate2D centerCoordinate = mapView.centerCoordinate;
+    
+//    if([self didChangeSpan:mapView.region.span])
+//    {
+//        _locationView.hidden = NO;
+//    }
+//    else
+//    {
+//        _locationView.hidden = YES;
+//    }
+    
+    if ([self didChangeLocation:centerCoordinate])
+    {
+        _locationView.hidden = YES;
+    }
+    else
+    {
+        _locationView.hidden = NO;
+    }
+}
+
+#pragma 移动地图回调
+- (void)mapView:(BMKMapView *)mapView regionDidChangeAnimated:(BOOL)animated
+{
+    CLLocationCoordinate2D centerCoordinate = mapView.centerCoordinate;
+    APP_DebugLog(@" regionDidChangeAnimated %f,%f",centerCoordinate.latitude, centerCoordinate.longitude);
+    
+    if ([self didChangeLocation:centerCoordinate])
+    {
+        // 开始反地理编码
+        [self startReverseGeoCodeSearch:centerCoordinate];
+        
+        _lbLocationCenter.text = @"亲,正在努力为您加载中~";
+        
+        _locationView.hidden = NO;
+    }
+    
+    _pt = centerCoordinate;
+}
+
+
+#pragma 实现地图标注
+- (BMKAnnotationView *)mapView:(BMKMapView *)mapView viewForAnnotation:(id<BMKAnnotation>)annotation
+{
+    if ([annotation isKindOfClass:[RouteAnnotation class]])
+    {
+//        return [self getRouteAnnotationView:mapView viewForAnnotation:(RouteAnnotation*)annotation];
+    }
+    else
+    {
+        // 将地图标注添加到大头针视图
+//        BMKPinAnnotationView* newAnnotation = [[BMKPinAnnotationView alloc] initWithAnnotation:annotation reuseIdentifier:@"myLocationP"];
+//        newAnnotation.pinColor = BMKPinAnnotationColorRed;
+//        newAnnotation.animatesDrop = NO;
+//        newAnnotation.draggable = NO;
+//        newAnnotation.image = [UIImage imageNamed:@"myLocationP"];
+//        return newAnnotation;
+    }
+    return nil;
+}
+ 
+
+#pragma  定位回调
+- (void)didUpdateUserLocation:(BMKUserLocation *)userLocation
+{
+    if (userLocation != nil)
+    {
+        APP_DebugLog(@"didUpdateUserLocation lat %f,long %f",userLocation.location.coordinate.latitude,userLocation.location.coordinate.longitude);
+        
+        if((userLocation.location.coordinate.latitude == 0) && (userLocation.location.coordinate.longitude == 0))
+        {
+            [self startLocation];
+            return;
+        }
+        
+        // 取到定位的经纬度
+        _pt = userLocation.location.coordinate;
+        
+        // 开始反地理编码
+        [self startReverseGeoCodeSearch:_pt];
+        
+    }
+    else
+    {
+        APP_DebugLog(@"定位失败");
+    }
+}
+
+#pragma   反地理编码回调
+- (void)onGetReverseGeoCodeResult:(BMKGeoCodeSearch *)searcher result:(BMKReverseGeoCodeResult *)result errorCode:(BMKSearchErrorCode)error
+{
+    if (!error)
+    {
+        APP_DebugLog(@"反地理编码成功:%@",result.address);
+        APP_DebugLog(@"latitude:%f , longitude:%f",result.location.latitude,result.location.longitude);
+        
+        _locationCity = result.addressDetail.city;
+        APP_DebugLog(@"省:%@ - 市:%@ - 县:%@ - 街道:%@ - 牌号:%@",result.addressDetail.province,result.addressDetail.city,result.addressDetail.district,result.addressDetail.streetName,result.addressDetail.streetNumber);
+        
+        _pt = result.location;
+        
+        _searchBar.text = result.address;
+        BMKCoordinateRegion region;
+        BMKCoordinateSpan theSpan;
+        theSpan.latitudeDelta = MAP_DELTA_DETAIL;
+        theSpan.longitudeDelta = MAP_DELTA_DETAIL;
+        region.span = theSpan;
+        region.center = CLLocationCoordinate2DMake(_pt.latitude, _pt.longitude);
+        [_mapView setRegion:region animated:NO];
+        
+        _btnLocationCenter.hidden = NO;
+        
+        _lbLocationCenter.hidden = NO;
+        
+        _locationView.hidden = NO;
+        
+        [self updateLocationViewFrame:result.address];
+    }
+    else
+    {
+        APP_DebugLog(@"定位失败");
+    }
+}
+
+#pragma   正向地理编码回调
+- (void)onGetGeoCodeResult:(BMKGeoCodeSearch *)searcher result:(BMKGeoCodeResult *)result errorCode:(BMKSearchErrorCode)error
+{
+    if (!error)
+    {
+        APP_DebugLog(@"正向地理编码成功:%@",result.address);
+        APP_DebugLog(@"latitude:%f , longitude:%f",result.location.latitude,result.location.longitude);
+        
+        _pt = result.location;
+        
+        BMKCoordinateRegion region;
+        BMKCoordinateSpan theSpan;
+        theSpan.latitudeDelta = MAP_DELTA_DETAIL;
+        theSpan.longitudeDelta = MAP_DELTA_DETAIL;
+        region.span = theSpan;
+        region.center = CLLocationCoordinate2DMake(result.location.latitude, result.location.longitude);
+        [_mapView setRegion:region animated:NO];
+        
+        _btnLocationCenter.hidden = NO;
+        
+        _lbLocationCenter.hidden = NO;
+        
+        _locationView.hidden = NO;
+        
+        [self updateLocationViewFrame:result.address];
+    }
+    else
+    {
+        [self showAlert:@"" message:@"搜索失败,换个关键词试试吧" type:1];
+    }
+}
+
+#pragma mark - 导航栏
+-(NavBarInfoModel*)navBarInfo
+{
+    NavBarInfoModel *navBarInfo = [[NavBarInfoModel alloc]init];
+    navBarInfo.navCenterTitle = @"确定停车点";
+    return navBarInfo;
+}
+
+#pragma mark - 生命周期
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [_mapView viewWillAppear];
+    
+    _mapView.delegate = self;
+    _locationSeveice.delegate = self;
+    _geoCodeSearch.delegate = self;
+    
+    // 开始定位
+    [self startLocation];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    [_mapView viewWillDisappear];
+    
+    //不用时至nil
+    _mapView.delegate = nil;
+    _locationSeveice.delegate = nil;
+    _geoCodeSearch.delegate = nil;
+    
+    [_locationSeveice stopUserLocationService];
+    
+    [self stopLoading];
+}
+
+- (void)dealloc
+{
+    _mapView = nil;
+    _locationSeveice = nil;
+    _geoCodeSearch = nil;
+    APP_DebugLog(@"LocationViewController dealloc");
+}
+
+-(void)gotoBack:(UIButton *)sender
+{
+    if (self.pageCallBack)
+    {
+        self.pageCallBack([_searchBar.text trimNull],_pt,nil);
+    }
+    [self popViewControllerFromTop];
+}
+
+@end

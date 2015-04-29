@@ -1,0 +1,386 @@
+//
+//  BaseDao.m
+//  WashCar
+//
+//  Created by yanshengli on 14-12-30.
+//  Copyright (c) 2014年 cheletong. All rights reserved.
+//
+
+#import "BaseDao.h"
+#import "DBHelper.h"
+#import "FMResultSet.h"
+#import "NSObject+Utility.h"
+#import "NSString+Utility.h"
+#import "BaseDaoModel.h"
+#import "FMDatabase.h"
+#import "TablePropertyModel.h"
+
+/***
+ *
+ *@descroiption:数据库dao父类--实现
+ *@author:liys
+ *@since:2014-12-15
+ *@corp:cheletong
+ *
+ */
+@implementation BaseDao
+
+#pragma mark 初始化方法
+-(id)init{
+    self = [super init];
+    if (self)
+    {
+        [self checkTableUpdate];
+    }
+    return self;
+}
+
+#pragma mark 检查是否需要更新表结构--子类覆盖
+-(void)checkTableUpdate
+{
+    //数据库中表的列
+    NSMutableDictionary *columnNames = [self tableColumnsByClass:[self tableClass]];
+    if (columnNames.count <= 0)
+    {
+        //没有列－－说明没有对应的表，则创建表
+        [self createTableByClass:[self tableClass]];
+    }
+    else
+    {
+        //有列名，则需要检查列--如果是新增字段，或者是类型修改了，则需要更新表结构
+        BaseDaoModel *model = (BaseDaoModel*)[[self tableClass] new];
+        NSMutableDictionary *properties = [model tableProperties];
+        NSMutableDictionary *needUpdateColumns = [NSMutableDictionary dictionary];
+        [properties enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop)
+        {
+            NSString *columnName = key;
+            TablePropertyModel *modelProp = (TablePropertyModel*)obj;
+            NSString *newType = modelProp.fieldtype;
+            NSString *oldType = [columnNames objectForKey:columnName];
+            if ([CommonUtils isStrEmpty:oldType])
+            {
+                //新增字段
+                [needUpdateColumns setObject:newType forKey:columnName];
+            }
+        }];
+        //更新表结构
+        if (needUpdateColumns.count > 0) {
+            [self updateTable:needUpdateColumns];
+        }
+    }
+}
+
+#pragma mark 更新表结构--子类覆盖
+-(void)updateTable:(NSMutableDictionary*)needUpdateColumns
+{
+    [[DBHelper sharedDBHelper].databaseQueue inDatabase:^(FMDatabase *db) {
+        __weak BaseDao * baseDao = self;
+        [needUpdateColumns enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+           NSString *sql = [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN %@ %@",
+                   NSStringFromClass([baseDao tableClass]),
+                   key,
+                   obj];
+            [db executeUpdate:sql];
+        }];
+    }];
+}
+
+#pragma mark 判断表是否存在
+-(BOOL)tableExist:(NSString*)tableName
+{
+    NSString *sql = [NSString stringWithFormat:@"SELECT COUNT(*) FROM sqlite_master where type='%@' and name='%@'",@"table",tableName];
+    __block int count = 0;
+    [self executeQuery:sql arrayParams:nil callback:^(FMResultSet *resultSet, NSArray *columnNames) {
+        if (resultSet.next)
+        {
+            count = [resultSet intForColumnIndex:0];
+        }
+    }];
+    return count > 0;
+}
+
+#pragma mark 获取表对应的列名
+-(NSMutableDictionary*)tableColumnsByClass:(Class)clazz
+{
+    return [self tableColumns:NSStringFromClass(clazz)];
+}
+
+#pragma mark 获取表的列名
+-(NSMutableDictionary*)tableColumns:(NSString*)tableName
+{
+    NSMutableDictionary *columns = [NSMutableDictionary dictionary];
+    if (![self tableExist:tableName])
+    {
+        return columns;
+    }
+    NSString *sql = [NSString stringWithFormat:@"PRAGMA table_info(%@)",tableName];
+    [self executeQuery:sql arrayParams:nil callback:^(FMResultSet *resultSet, NSArray *columnNames) {
+        while (resultSet.next) {
+           NSString *columnName = [resultSet stringForColumn:@"name"];
+           NSString *columnType = [resultSet stringForColumn:@"type"];
+           [columns setObject:columnType forKey:columnName];
+        }
+    }];
+    return columns;
+}
+
+#pragma marlk 判断表是否存在
+-(BOOL)tableExistByClass:(Class)clazz
+{
+    return [self tableExist:NSStringFromClass(clazz)];
+}
+
+#pragma mark 创建表
+-(BOOL)createTableByClass:(Class)clazz
+{
+    if (![self tableExistByClass:clazz])
+    {
+       return [self createTable:[self createTbSql:clazz]];
+    }
+    else
+    {
+       return YES;
+    }
+    
+}
+
+#pragma mark 创建表
+-(BOOL)createTable:(NSString *)createTableSql
+{
+   return [self executeUpdate:createTableSql dictParams:nil];
+}
+
+#pragma mark 删除表
+-(BOOL)dropTable:(Class)clazz
+{
+    return [self dropTableByTableName:NSStringFromClass(clazz)];
+}
+
+
+#pragma mark 删除表
+-(BOOL)dropTableByTableName:(NSString*)tableName
+{
+    NSString *sql = [NSString stringWithFormat:@"drop table if exists %@",tableName];
+    return [self executeUpdate:sql arrayParams:nil];
+}
+
+#pragma mark 执行更新操作
+-(BOOL)executeUpdate:(NSString*)sql dictParams:(NSDictionary*)params
+{
+    __block BOOL result = NO;
+    [[DBHelper sharedDBHelper].databaseQueue inDatabase:^(FMDatabase *db) {
+        result = [db executeUpdate:sql withParameterDictionary:params];
+    }];
+    return result;
+}
+
+#pragma mark 执行更新操作
+-(BOOL)executeUpdate:(NSString*)sql arrayParams:(NSArray*)params
+{
+    __block BOOL result = NO;
+    [[DBHelper sharedDBHelper].databaseQueue inDatabase:^(FMDatabase *db) {
+        result = [db executeUpdate:sql withArgumentsInArray:params];
+    }];
+    return result;
+}
+
+#pragma mark 执行查询sql
+-(void)executeQuery:(NSString*)sql dictParams:(NSDictionary*)params callback:(QueryResultCallBack)callback
+{
+    __weak BaseDao * baseDao = self;
+    [[DBHelper sharedDBHelper].databaseQueue inDatabase:^(FMDatabase *db) {
+        //执行查询
+        FMResultSet *resultSet = [db executeQuery:sql withParameterDictionary:params];
+        //获取列名
+        NSMutableArray *columnNames =[baseDao columnNames:resultSet];
+        //回调
+        callback(resultSet,columnNames);
+        //关闭
+        [resultSet close];
+    }];
+}
+
+#pragma mark 获取查询结果集中的列名
+-(NSMutableArray*)columnNames:(FMResultSet*)resultSet
+{
+    NSMutableArray *columnNames = [[NSMutableArray alloc]init];
+    NSMutableDictionary *columnNameDict = [resultSet columnNameToIndexMap];
+    [columnNameDict enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+        [columnNames addObject:key];
+    }];
+    return columnNames;
+}
+
+#pragma mark 执行查询sql
+-(void)executeQuery:(NSString*)sql arrayParams:(NSArray*)params callback:(QueryResultCallBack)callback
+{
+    __weak BaseDao * baseDao = self;
+    [[DBHelper sharedDBHelper].databaseQueue inDatabase:^(FMDatabase *db) {
+        //执行查询
+        FMResultSet *resultSet = [db executeQuery:sql withArgumentsInArray:params];
+        //获取列名
+        NSMutableArray *columnNames =[baseDao columnNames:resultSet];
+        //回调
+        callback(resultSet,columnNames);
+        //关闭
+        [resultSet close];
+    }];
+}
+
+#pragma 获取创建表的SQL
+-(NSMutableString *)createTbSql:(Class)clazz
+{
+    NSMutableString *sql;
+    NSObject *obj = [clazz new];
+    if ([obj isKindOfClass:[BaseDaoModel class]] && [obj respondsToSelector:@selector(tableProperties)])
+    {
+        BaseDaoModel *model = (BaseDaoModel*)obj;
+        NSMutableDictionary *properties = [model tableProperties];
+        if (properties && properties.count > 0)
+        {
+            sql = [NSMutableString stringWithFormat:@"create table if not exists %@ (id integer primary key autoincrement,",[model tableName]];
+            __block int index = 0;
+            [properties enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+                NSString *columnName = key;
+                index++;
+                TablePropertyModel *property = (TablePropertyModel*)obj;
+                if (index < properties.count)
+                {
+                    [sql appendFormat:@"%@ %@,",columnName,property.fieldtype];
+                }
+                else
+                {
+                    [sql appendFormat:@"%@ %@",columnName,property.fieldtype];
+                }
+                
+            }];
+            [sql appendFormat:@")"];
+        }
+    }
+    return sql;
+}
+
+
+#pragma mark 获取保存sql的语句
+-(NSMutableString*)baseSaveSql:(BaseDaoModel*)model
+{
+    NSMutableString *sql;
+    NSMutableDictionary *properties = [model tableProperties];
+    if (properties && properties.count > 0)
+    {
+        sql = [NSMutableString stringWithFormat:@"insert into %@",model.tableName];
+        NSMutableString *tableFieldNames = [NSMutableString stringWithFormat:@"("];
+        NSMutableString *tableFieldValues = [NSMutableString stringWithFormat:@"values("];
+        __block int index = 0;
+        [properties enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+            index++;
+            if (index < properties.count)
+            {
+                [tableFieldNames appendFormat:@"%@,",key];
+                [tableFieldValues appendFormat:@":%@,",key];
+            }
+            else
+            {
+                [tableFieldNames appendFormat:@"%@)",key];
+                [tableFieldValues appendFormat:@":%@)",key];
+            }
+        }];
+        [sql appendFormat:@"%@%@",tableFieldNames,tableFieldValues];
+    }
+    return sql;
+}
+
+#pragma mark 更新操作的SQL
+-(NSMutableString*)baseUpdateSql:(BaseDaoModel*)model
+{
+    NSMutableString *sql;
+    NSMutableDictionary *properties = [model tableProperties];
+    if (properties && properties.count > 0) {
+        sql = [NSMutableString stringWithFormat:@"update %@ set ",model.tableName];
+        __block int index = 0;
+        [properties enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+            index++;
+            TablePropertyModel *propertyModel = (TablePropertyModel*)obj;
+            if (index < properties.count)
+            {
+                if (propertyModel.fieldvalue)
+                {
+                    [sql appendFormat:@"%@ = :%@,",key,key];
+                }
+            }
+            else
+            {
+                if (propertyModel.fieldvalue)
+                {
+                    [sql appendFormat:@"%@ = :%@",key,key];
+                }
+            }
+        }];
+    }
+    return sql;
+}
+
+#pragma mark 执行查询--参数为字典
+-(NSMutableArray*)query:(NSString*)sql dictParams:(NSDictionary*)params
+{
+    //3.执行查询
+    NSMutableArray *resultArray = [NSMutableArray array];
+    if ([self createTableByClass:[self tableClass]])
+    {
+        [self executeQuery:sql dictParams:params callback:^(FMResultSet *resultSet, NSArray *columnNames) {
+            while (resultSet.next) {
+                NSMutableDictionary *item = [NSMutableDictionary dictionary];
+                for (int index = 0 ; index < columnNames.count; index++) {
+                    NSString *columnName = [columnNames objectAtIndex:index];
+                    NSString *columnValue = [resultSet stringForColumn: columnName];
+                    if (!columnValue) {
+                        columnValue = @"";
+                    }
+                    [item setObject:columnValue forKey:columnName];
+                }
+                
+                [resultArray addObject:item];
+            }
+        }];
+    }
+    return resultArray;
+}
+
+#pragma mark 执行查询--参数为数组
+-(NSMutableArray*)query:(NSString *)sql arrayParams:(NSArray *)params
+{
+    //3.执行查询
+    NSMutableArray *resultArray = [NSMutableArray array];
+    if ([self createTableByClass:[self tableClass]])
+    {
+        [self executeQuery:sql arrayParams:params callback:^(FMResultSet *resultSet, NSArray *columnNames) {
+            while (resultSet.next) {
+                NSMutableDictionary *item = [NSMutableDictionary dictionary];
+                for (int index = 0 ; index < columnNames.count; index++) {
+                    NSString *columnName = [columnNames objectAtIndex:index];
+                    NSString *columnValue = [resultSet stringForColumn: columnName];
+                    if (!columnValue) {
+                        columnValue = @"";
+                    }
+                    [item setObject:columnValue forKey:columnName];
+                }
+                
+                [resultArray addObject:item];
+            }
+        }];
+    }
+    return resultArray;
+}
+
+#pragma mark 获取表结构对应的类对象
+-(Class)tableClass
+{
+    return [BaseDaoModel class];
+}
+
+#pragma mark 获取表名
+-(NSString*)tableName
+{
+    return NSStringFromClass([self tableClass]);
+}
+@end

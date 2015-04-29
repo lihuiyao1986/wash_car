@@ -1,0 +1,80 @@
+//
+//  BaseDao.h
+//  WashCar
+//
+//  Created by yanshengli on 14-12-30.
+//  Copyright (c) 2014年 cheletong. All rights reserved.
+//
+
+#import <Foundation/Foundation.h>
+#import "BaseModel.h"
+#import "FMResultSet.h"
+#import "BaseDaoModel.h"
+
+#pragma mark 查询结果回调块
+typedef void (^QueryResultCallBack)(FMResultSet *resultSet,NSArray *columnNames);
+
+/***
+ *
+ *@descroiption:数据库dao父类--接口
+ *@author:liys
+ *@since:2014-12-15
+ *@corp:cheletong
+ *
+ */
+@interface BaseDao : NSObject
+
+#pragma mark 判断表是否存在
+-(BOOL)tableExist:(NSString*)tableName;
+
+#pragma marlk 判断表是否存在
+-(BOOL)tableExistByClass:(Class)clazz;
+
+#pragma mark 获取创建表的SQL
+-(NSMutableString *)createTbSql:(Class)clazz;
+
+#pragma mark 获取保存sql的语句
+-(NSMutableString*)baseSaveSql:(BaseDaoModel*)model;
+
+#pragma mark 获取表的列名
+-(NSMutableDictionary*)tableColumnsByClass:(Class)clazz;
+
+#pragma mark 获取表的列名
+-(NSMutableDictionary*)tableColumns:(NSString*)tableName;
+
+#pragma mark 创建表
+-(BOOL)createTableByClass:(Class)clazz;
+
+#pragma mark 删除表
+-(BOOL)dropTable:(Class)clazz;
+
+#pragma mark 删除表
+-(BOOL)dropTableByTableName:(NSString*)tableName;
+
+#pragma mark 更新操作的SQL
+-(NSMutableString*)baseUpdateSql:(BaseDaoModel*)model;
+
+#pragma mark 执行更新sql
+-(BOOL)executeUpdate:(NSString*)sql dictParams:(NSDictionary*)params;
+
+#pragma mark 执行更新操作
+-(BOOL)executeUpdate:(NSString*)sql arrayParams:(NSArray*)params;
+
+#pragma mark 执行查询sql
+-(void)executeQuery:(NSString*)sql dictParams:(NSDictionary*)params callback:(QueryResultCallBack)callback;
+
+#pragma mark 执行查询sql
+-(void)executeQuery:(NSString*)sql arrayParams:(NSArray*)params callback:(QueryResultCallBack)callback;
+
+#pragma mark 执行查询--参数为字典
+-(NSMutableArray*)query:(NSString*)sql dictParams:(NSDictionary*)params;
+
+#pragma mark 执行查询--参数为数组
+-(NSMutableArray*)query:(NSString *)sql arrayParams:(NSArray *)params;
+
+#pragma mark 获取表结构对应的类对象
+-(Class)tableClass;
+
+#pragma mark 获取表名
+-(NSString*)tableName;
+@end

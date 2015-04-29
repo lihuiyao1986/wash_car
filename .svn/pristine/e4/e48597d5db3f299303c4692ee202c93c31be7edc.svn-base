@@ -1,0 +1,91 @@
+//
+//  DateUtils.m
+//  NaChe
+//
+//  Created by nachebang on 14-10-30.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import "DateUtils.h"
+
+@implementation DateUtils
++(NSString*)nowForString{
+    NSDateFormatter *format = [[NSDateFormatter alloc]init];
+    [format setDateFormat:@"yyyyMMddHHmmssSSS"];
+    NSString *dateString = [format stringFromDate:[NSDate date]];
+    return dateString;
+}
+
++(NSString*)dateFormatString : (NSString*) stringDate
+{
+    NSString * timeString = nil;
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+
+    NSDate *d = [dateFormatter dateFromString:stringDate];
+    NSTimeInterval late = [d timeIntervalSince1970]*1;
+   
+    NSDate * dat = [NSDate dateWithTimeIntervalSinceNow:0];
+    NSTimeInterval now = [dat timeIntervalSince1970]*1;
+    NSTimeInterval cha = now - late;
+    
+    if (cha/3600 < 1) {
+        timeString = [NSString stringWithFormat:@"%f", cha/60];
+        timeString = [timeString substringToIndex:timeString.length-7];
+        int num= [timeString intValue];
+        if (num <= 1) {
+            timeString = [NSString stringWithFormat:@"刚刚..."];
+        }else{
+            timeString = [NSString stringWithFormat:@"%@分钟前", timeString];
+        }
+    }
+    
+    if (cha/3600 > 1 && cha/86400 < 1) {
+        timeString = [NSString stringWithFormat:@"%f", cha/3600];
+        timeString = [timeString substringToIndex:timeString.length-7];
+        timeString = [NSString stringWithFormat:@"%@小时前", timeString];
+    }
+    
+    if (cha/86400 > 1) {
+        timeString = [NSString stringWithFormat:@"%f", cha/86400];
+        timeString = [timeString substringToIndex:timeString.length-7];
+        int num = [timeString intValue];
+        //把天折算成秒
+        NSTimeInterval secondPerDay = 24*60*60;
+        NSCalendar * calendar = [NSCalendar currentCalendar];
+        unsigned uintFlags = NSYearCalendarUnit | NSMonthCalendarUnit | NSDayCalendarUnit;
+        if (num < 2) {
+            NSDate * yesterDay = [NSDate dateWithTimeIntervalSinceNow:-secondPerDay];
+            NSDateComponents * souretime = [calendar components:uintFlags fromDate:d];
+            NSDateComponents * yesterday = [calendar components:uintFlags fromDate:yesterDay];
+            if (souretime.year == yesterday.year && souretime.month == yesterday.month && souretime.day == yesterday.day){
+                [dateFormatter setDateFormat:@"HH:mm"];
+                timeString = [NSString stringWithFormat:@"昨天 %@",[dateFormatter stringFromDate:d]];
+            }
+        }else if(num == 2){
+            NSDate * beforeYesterDay = [NSDate dateWithTimeIntervalSinceNow:-2*secondPerDay];
+            NSDateComponents * beforeSouretime = [calendar components:uintFlags fromDate:d];
+            NSDateComponents * beforeYesterday = [calendar components:uintFlags fromDate:beforeYesterDay];
+            if (beforeSouretime.year == beforeYesterday.year && beforeSouretime.month == beforeYesterday.month && beforeSouretime.day == beforeYesterday.day){
+                [dateFormatter setDateFormat:@"HH:mm"];
+                timeString = [NSString stringWithFormat:@"前天 %@",[dateFormatter stringFromDate:d]];
+            }
+            //timeString = [NSString stringWithFormat:@"" ];
+        }else if (num > 2 && num <7){
+            timeString = [NSString stringWithFormat:@"%@天前", timeString];
+        }else if (num >= 7 && num <= 10) {
+            timeString = [NSString stringWithFormat:@"1周前"];
+        }else if(num > 10 && num <= 365){
+            [dateFormatter setDateFormat:@"M月d日"];
+            NSString *dateMd = [dateFormatter stringFromDate:d];
+            timeString = [NSString stringWithFormat:@"%@", dateMd];
+        }else if(num > 365){
+            [dateFormatter setDateFormat:@"yy年M月d日"];
+            NSString *dateYMD = [dateFormatter stringFromDate:d];
+            timeString = [NSString stringWithFormat:@"%@", dateYMD];
+        }
+     }
+   return timeString;
+}
+
+@end

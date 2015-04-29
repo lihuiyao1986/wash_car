@@ -1,0 +1,456 @@
+//
+//  HttpRequestClient.m
+//  NaChe
+//
+//  Created by yanshengli on 14-12-15.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import "HttpRequestClient.h"
+#import "RequestParams.h"
+#import "AFHTTPRequestOperationManager.h"
+#import "NSString+Utility.h"
+
+#define server_error_msg @"亲，服务器忙，稍后重试"
+#define bad_resp_format_msg @"亲，响应结果格式错误"
+#define invalid_reqUrl_msg @"亲，请求url无效"
+#define no_imgs_available @"亲，上传的图片不存在"
+#define img_upload_error_msg @"亲，图片上传失败"
+#define no_network_available_msg @"亲，网络不可用哦"
+
+/**
+ * http请求对应client
+ * @since:2014-12-15
+ * @author:liys
+ */
+@implementation HttpRequestClient
+//代理
+@synthesize delegate;
+@synthesize finishBlock;
+@synthesize uploadProBlock;
+#pragma 发送post请求
+-(void)doPostWithUrl:(NSString *)url params:(NSDictionary*)params dataType:(HttpRequestDataType)dataType reqTag:(int)reqTag{
+    //先检查网络是否可用
+    if (![ApplicationDelegate connectedToNetwork])
+    {
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil
+                            errorcode:HttpRespCode_No_Network_Available
+                             errorMsg:no_network_available_msg
+                             dataType:dataType
+                                  tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:no_network_available_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_No_Network_Available] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+        return;
+    }
+    
+    //请求url为空
+    if ([CommonUtils isStrEmpty:url])
+    {
+        if ([self respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil errorcode:HttpRespCode_Bad_ReqUrl errorMsg:invalid_reqUrl_msg dataType:dataType tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:invalid_reqUrl_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_Bad_ReqUrl] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);;
+        }
+        return ;
+    }
+    
+    //组装请求参数
+    NSMutableDictionary *ultimateParams = [self obtainFinalReqParams:Http_Req_Type_Post params:params url:url];
+    
+    //转义一下url
+    url = [self fullUrl:url httpReqType:Http_Req_Type_Post];
+    
+    //开始请求
+    AFHTTPRequestOperationManager *manager=[AFHTTPRequestOperationManager manager];
+    manager.responseSerializer = [self respSerializer:dataType];
+    [manager POST:url parameters:ultimateParams userAgent:[UserAgentUtils getUserAgent] success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        //只处理返回的数据类型为NSDictionary的数据
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            if([responseObject isKindOfClass:[NSDictionary class]])
+            {
+                NSDictionary *data = (NSDictionary *)responseObject;
+                NSDictionary * resultInfo = [data objectForKey:@"ncbError"];
+                int errorcode = [[resultInfo objectForKey:@"code"] intValue];//错误码
+                NSString *errormsg = [resultInfo objectForKey:@"message"];//错误消息
+                [self.delegate respResult:responseObject errorcode:errorcode errorMsg:errormsg dataType:dataType tag:reqTag];
+            }
+            else
+            {
+                [self.delegate respResult:responseObject errorcode:HttpRespCode_Bad_Resp_Format
+                                                         errorMsg:bad_resp_format_msg
+                                                         dataType:dataType
+                                                         tag:reqTag];
+            }
+        }
+        if (finishBlock)
+        {
+            finishBlock(responseObject,dataType,reqTag);
+        }
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil errorcode:HttpRespCode_ServerError
+                                          errorMsg:server_error_msg
+                                          dataType:dataType
+                                          tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:server_error_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_ServerError] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+    }];
+}
+
+#pragma 获取响应解析器
+-(AFHTTPResponseSerializer*)respSerializer:(HttpRequestDataType)dataType{
+    AFHTTPResponseSerializer *serializer;
+    switch (dataType) {
+        case json_data_type:
+            serializer = [AFJSONResponseSerializer serializer];
+            break;
+          case xml_data_type:
+            serializer = [AFXMLParserResponseSerializer serializer];
+            break;
+        default:
+            serializer = [AFJSONResponseSerializer serializer];
+            break;
+    }
+    return serializer;
+}
+
+#pragma 发送get请求
+-(void)doGetWithUrl:(NSString *)url params:(NSDictionary*)params dataType:(HttpRequestDataType)dataType reqTag:(int)reqTag{
+    //先检查网络是否可用
+    NetworkStatus networkStatus = [ApplicationDelegate currNetStatus];
+    if (networkStatus == NotReachable)
+    {
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil
+                            errorcode:HttpRespCode_No_Network_Available
+                             errorMsg:no_network_available_msg
+                             dataType:dataType
+                                  tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:no_network_available_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_No_Network_Available] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+        return;
+    }
+    //请求url为空
+    if ([CommonUtils isStrEmpty:url])
+    {
+        if ([self respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil errorcode:HttpRespCode_Bad_ReqUrl
+                                          errorMsg:invalid_reqUrl_msg
+                                          dataType:dataType
+                                          tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:invalid_reqUrl_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_Bad_ReqUrl] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+        return ;
+    }
+    
+    //组装数据
+    NSMutableDictionary *ultimateParams = [self obtainFinalReqParams:Http_Req_Type_Get params:params url:url];
+
+    //组装完整的url-1
+    NSString *httpUrl = [self fullUrl:url httpReqType:Http_Req_Type_Get];
+    
+    //开始请求
+    AFHTTPRequestOperationManager *manager=[AFHTTPRequestOperationManager manager];
+    manager.responseSerializer = [self respSerializer:dataType];
+    [manager GET:httpUrl parameters:ultimateParams success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        //只处理返回的数据类型为NSDictionary的数据
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            if([responseObject isKindOfClass:[NSDictionary class]])
+            {
+                NSDictionary *data = (NSDictionary *)responseObject;
+                NSDictionary * resultInfo = [data objectForKey:@"ncbError"];
+                int errorcode = [[resultInfo objectForKey:@"code"] intValue];//错误码
+                NSString *errormsg = [resultInfo objectForKey:@"message"];//错误消息
+                [self.delegate respResult:responseObject errorcode:errorcode
+                                                         errorMsg:errormsg
+                                                         dataType:dataType tag:reqTag];
+            }
+            else
+            {
+                [self.delegate respResult:responseObject errorcode:HttpRespCode_Bad_Resp_Format
+                                                         errorMsg:bad_resp_format_msg
+                                                         dataType:dataType
+                                                         tag:reqTag];
+            }
+        }
+        if (finishBlock)
+        {
+            finishBlock(responseObject,dataType,reqTag);
+        }
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil errorcode:HttpRespCode_ServerError
+                                          errorMsg:server_error_msg
+                                          dataType:dataType
+                                          tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:server_error_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_ServerError] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+    }];
+}
+
+#pragma 上传图片
+-(void)uploadImgWithUrl:(NSString *)url image:(UIImage *)image params:(NSDictionary *) params dataType:(HttpRequestDataType)dataType tag:(int)reqTag{
+    [self bacthUploadImgsWithUrl:url images:[NSArray arrayWithObjects:image, nil]
+                                     params:params
+                                     dataType:dataType
+                                     tag:reqTag];
+}
+
+#pragma 批量上传图片
+-(void)bacthUploadImgsWithUrl:(NSString*)url images:(NSArray*)images params:(NSDictionary *) params dataType:(HttpRequestDataType)dataType  tag:(int)reqTag{
+    //先检查网络是否可用
+    NetworkStatus networkStatus = [ApplicationDelegate currNetStatus];
+    if (networkStatus == NotReachable)
+    {
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)])
+        {
+            [self.delegate respResult:nil
+                            errorcode:HttpRespCode_No_Network_Available
+                             errorMsg:no_network_available_msg
+                             dataType:dataType
+                                  tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:no_network_available_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_No_Network_Available] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+        return;
+    }
+    //检查是否有图片数据
+    if (images == nil || images.count ==0)
+    {
+        if ([self respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)]) {
+            [self.delegate respResult:nil errorcode:HttpRespCode_Upload_Img_Unavailable
+                                          errorMsg:no_imgs_available
+                                          dataType:dataType
+                                          tag:reqTag];
+        }
+        if (finishBlock) {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:no_imgs_available forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_Upload_Img_Unavailable] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+        return;
+    }
+    //检查url
+    if ([CommonUtils isStrEmpty: url]) {
+        if ([self respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)]) {
+            [self.delegate respResult:nil errorcode:HttpRespCode_Bad_ReqUrl
+                                          errorMsg:invalid_reqUrl_msg
+                                          dataType:dataType
+                                          tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:invalid_reqUrl_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_Bad_ReqUrl] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+        return;
+    }
+    
+    //获取参数
+    NSMutableDictionary *ultimateParams = [self obtainFinalReqParams:Http_Req_Type_Post params:params url:url];
+    
+    //获取url
+    NSString * httpUrl = [self fullUrl:url httpReqType:Http_Req_Type_Post];
+
+    //开始请求
+    AFHTTPRequestOperationManager *manager=[AFHTTPRequestOperationManager manager];
+    [manager POST:httpUrl parameters:ultimateParams userAgent:[UserAgentUtils getUserAgent] constructingBodyWithBlock:^(id<AFMultipartFormData> formData) {
+        for (int index = 0 ; index < images.count; index++) {
+            //表单名
+            NSString *name = [NSString stringWithFormat:@"photo%@", [NSNumber numberWithInteger:index]];
+            //文件名
+            NSString *filename = [NSString stringWithFormat:@"%@%@",name,@".jpeg"];
+            //图片对象
+            UIImage *itemImage = [images objectAtIndex:index];
+            //图片对应的data
+            NSData *imageData = UIImageJPEGRepresentation(itemImage, 0.5);
+            //组装数据
+            [formData appendPartWithFileData:imageData name:name fileName:filename mimeType:@"image/jpeg"];
+        }
+    } success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        //只处理返回的数据类型为NSDictionary的数据
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)]) {
+            if([responseObject isKindOfClass:[NSDictionary class]])
+            {
+                NSDictionary *data = (NSDictionary *)responseObject;
+                NSDictionary * resultInfo = [data objectForKey:@"ncbError"];
+                int errorcode = [[resultInfo objectForKey:@"code"] intValue];//错误码
+                NSString *errormsg = [resultInfo objectForKey:@"message"];//错误消息
+                [self.delegate respResult:responseObject errorcode:errorcode
+                                 errorMsg:errormsg
+                                 dataType:dataType tag:reqTag];
+            }
+            else
+            {
+                [self.delegate respResult:responseObject errorcode:HttpRespCode_Bad_Resp_Format
+                                 errorMsg:bad_resp_format_msg
+                                 dataType:dataType
+                                      tag:reqTag];
+            }
+            if (finishBlock)
+            {
+                finishBlock(responseObject,dataType,reqTag);
+            }
+        }
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error){
+        if ([self.delegate respondsToSelector:@selector(respResult:errorcode:errorMsg:dataType:tag:)]) {
+            [self.delegate respResult:nil errorcode:HttpRespCode_ServerError
+                             errorMsg:img_upload_error_msg
+                             dataType:dataType
+                                  tag:reqTag];
+        }
+        if (finishBlock)
+        {
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            [resultDict setObject:img_upload_error_msg forKey:@"message"];
+            [resultDict setObject:[NSNumber numberWithInt:HttpRespCode_ServerError] forKey:@"code"];
+            finishBlock(resultDict,dataType,reqTag);
+        }
+    } progressBlock:^(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite) {
+        if ([self.delegate respondsToSelector:@selector(uploadProgressWithFinishedBytes:totalBytes:)])
+        {
+            [self.delegate uploadProgressWithFinishedBytes:totalBytesWritten
+                                                totalBytes:totalBytesExpectedToWrite];
+        }
+        if (uploadProBlock)
+        {
+            uploadProBlock(totalBytesWritten,totalBytesExpectedToWrite);
+        }
+    }];
+
+}
+
+#pragma mark 获取最终的请求参数
+-(NSMutableDictionary*)obtainFinalReqParams:(Http_Req_Type)type params:(NSDictionary*)params url:(NSString*)url
+{
+    NSMutableDictionary *reqParams;
+    switch (type)
+    {
+        case Http_Req_Type_Get:
+            reqParams = [self packGetReqParams:params url:url];
+            break;
+        case Http_Req_Type_Post:
+            reqParams = [self packPostReqParams:params url:url];
+            break;
+        default:
+            break;
+    }
+    return reqParams;
+}
+
+#pragma mark 获取get请求参数
+-(NSMutableDictionary*)packGetReqParams:(NSDictionary*)params url:(NSString*)url
+{
+    NSMutableDictionary *ultimateParams = [NSMutableDictionary dictionary];
+    if (params && params.count > 0)
+    {
+        [ultimateParams addEntriesFromDictionary:params];
+    }
+    if (![url isValidUrl])
+    {
+        //组装请求参数
+        RequestParams *commonParams = [[RequestParams alloc]initWithUrl:url];
+        //添加公共参数
+        [ultimateParams addEntriesFromDictionary:[commonParams getRequestHeaderParams]];
+        //设置用户代理
+        [ultimateParams setObject:[UserAgentUtils getUserAgent] forKey:@"User-Agent"];
+    }
+    return ultimateParams;
+}
+
+#pragma mark 获取post请求参数
+-(NSMutableDictionary*)packPostReqParams:(NSDictionary*)params url:(NSString*)url
+{
+    if ([url isValidUrl])
+    {
+        return [NSMutableDictionary dictionaryWithDictionary:params];
+    }
+    else
+    {
+        RequestParams *commonParams = [[RequestParams alloc]initWithUrl:url];
+        NSMutableDictionary *ultimateParams = [commonParams getRequestHeaderParams];
+        if (params && params.count > 0)
+        {
+            [ultimateParams addEntriesFromDictionary:params];
+        }
+        return ultimateParams;
+    }
+}
+
+#pragma 转义url
+-(NSString *)fullUrl:(NSString *)url  httpReqType:(Http_Req_Type)httpReqType
+{
+    
+    if (httpReqType == Http_Req_Type_Post)
+    {
+        if (![url isValidUrl])
+        {
+            url = [NSString stringWithFormat:@"%@%@", BASE_HOST, url];
+        }
+    }
+    else
+    {
+        if (![url isValidUrl])
+        {
+            url = [NSString stringWithFormat:@"%@%@", BASE_HOST, url];
+        }
+        else
+        {
+            url = [NSString stringWithFormat:@"%@", url];
+        }
+    }
+    return url;
+}
+@end

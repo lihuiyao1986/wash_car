@@ -1,0 +1,787 @@
+//
+//  AppDelegate.m
+//  NaChe
+//
+//  Created by apple on 14/10/19.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import "AppDelegate.h"
+#import "MyReachability.h"
+#import "GexinSdk.h"
+#import "NSString+Utility.h"
+#import "NSString+JSONCategories.h"
+#import "MobClick.h"
+#import "LoginController.h"
+#import "MainController.h"
+#import "UIView+Toast.h"
+#import "DXAlertView.h"
+#import "GXDao.h"
+#import "GXModel.h"
+#import "AFNetworkActivityIndicatorManager.h"
+#import "AFNetworkReachabilityManager.h"
+#import "AFHTTPRequestOperationManager.h"
+
+//弹出框按钮标题
+#define cancelBtnText @"知道了..."
+#define destructiveBtnTxt @"确定"
+//自动登录请求tag
+#define autoLoginReqTag 100
+//上传clientID和uuid
+#define postClientidTag 200
+
+typedef NS_ENUM(int, PayloadMsgType)
+{
+    //作为状态通知，tilte=订单号，content=状态，多个参数的用逗号分开，目前适用于一个参数
+    //作为派单消息，title=订单号，content=派单时间
+    //作为用户消息，title是标题，content是内容
+    PayloadMsgType_NormalMsg = 1 , // 1普通消息（含标题和内容）
+    PayloadMsgType_PicMsg = 2 , // 2图片消息
+    PayloadMsgType_LinkMsg = 3 , // 3链接消息
+    PayloadMsgType_StatusChangeMsg = 101 ,  // 101状态通知
+    PayloadMsgType_SendordersMsg = 102 // 102派单消息
+};
+
+@interface AppDelegate()
+<GexinSdkDelegate,
+ BMKGeneralDelegate,
+ HttpRequestClientDelegate
+>
+
+@end
+
+@implementation AppDelegate
+//设备id
+@synthesize washcarDeviceToken;
+//个信推送对象
+@synthesize gexinPusher;
+//个信推送的appKey
+@synthesize gxAppKey;
+//个信推送的app密钥
+@synthesize gxAppSecret;
+//个信推送的appId
+@synthesize gxAppID;
+//个信推送的clientId
+@synthesize gxClientId;
+//个信推送sdk的状态
+@synthesize gxSdkStatus;
+//个信推送，最后一次payload索引
+@synthesize lastPayloadIndex;
+//个信推送的payload标识
+@synthesize gxpayloadId;
+//窗体对象
+@synthesize window = _window;
+//百度地图相关的属性
+@synthesize mapManager = _mapManager;
+//网络连接状态
+@synthesize currNetStatus = _currNetStatus;
+//导航控制器
+@synthesize navController = _navController;
+//httpClient对象
+@synthesize httpClient = _httpClient;
+
+#pragma mark 生命周期方法--didFinishLaunchingWithOptions
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
+{
+    /**  启动百度地图 **/
+    [self startBDMap];
+    
+    /** 设置应用程序的配置参数  **/
+    [self configApplication];
+    
+    /** 注册APNS */
+    [self registerSysNotification];
+    
+    /** 启动个信sdk **/
+    [self startGXSDK];
+    
+    /**  添加友盟统计的支持 **/
+    [self startUmeng];
+    
+    /**  检查网络 **/
+    [self checkNetwork];
+    
+    /** 设置窗口对象 **/
+    [self initWindow];
+    
+    /** 初始化请求数据 **/
+    [self requestCommonData];
+    
+    /** 线程休眠2秒 **/
+    [NSThread sleepForTimeInterval:2];
+    
+    return YES;
+}
+
+#pragma mark 检测网络连接
+-(void)checkNetwork
+{
+    [[AFNetworkActivityIndicatorManager sharedManager] setEnabled:YES];
+    __weak AppDelegate *thisDelegate = self;
+    [[AFNetworkReachabilityManager sharedManager] setReachabilityStatusChangeBlock:^(AFNetworkReachabilityStatus status)
+    {
+        if (status == AFNetworkReachabilityStatusNotReachable)
+        {
+            [thisDelegate showAlert:nil message:@"网络已断开" type:AlertViewType_Alert];
+        }
+    }];
+    [[AFNetworkReachabilityManager sharedManager] startMonitoring];
+}
+
+#pragma mark 获取httpClient
+-(HttpRequestClient *)httpClient
+{
+    if (!_httpClient)
+    {
+        _httpClient = [[HttpRequestClient alloc]init];
+        _httpClient.delegate = self;
+    }
+    return _httpClient;
+}
+
+#pragma mark 请求一些公共的数据
+-(void)requestCommonData
+{
+    //1.自动登录
+    [self autoLogin];
+}
+
+#pragma mark 自动登录
+-(void)autoLogin
+{
+    //先判断之前是否有登录过的用户
+    NSDictionary *loginUser = [CommonUtils loginUser];
+    if (loginUser)
+    {
+        __weak AppDelegate *selfDelegate = self;
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            NSString *userEncrypt = [loginUser objectForKey:@"userEncrypt"];
+            NSString *userUuid = [loginUser objectForKey:@"userUuid"];
+            NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:userEncrypt,@"userEncrypt",userUuid,@"userUuid",nil];
+            [selfDelegate.httpClient doPostWithUrl:autoLoginUrl
+                                    params:params
+                                  dataType:json_data_type
+                                    reqTag:autoLoginReqTag];
+        });
+    }
+}
+
+#pragma mark HttpRequestClientDelegate代理方法
+-(void)respResult:(NSDictionary*)result errorcode:(int)errorcode
+         errorMsg:(NSString*)errorMsg
+         dataType:(HttpRequestDataType)dataType
+              tag:(int)reqTag
+{
+    
+    if (errorcode == HttpRespCode_RespSuceess)
+    {
+        //响应成功
+        [self httpSuccessResp:result dataType:dataType tag:reqTag];
+    }
+    else
+    {
+        //响应失败
+        [self httpErrorResp:errorcode errorMsg:errorMsg dataType:dataType tag:reqTag];
+    }
+}
+
+
+#pragma mark 处理响应失败的情况
+-(void)httpErrorResp:(int)errorcode errorMsg:(NSString*)errorMsg
+            dataType:(HttpRequestDataType)dataType
+                 tag:(int)reqTag
+{
+    
+}
+
+#pragma mark 处理响应成功的情况
+-(void)httpSuccessResp:(NSDictionary*)result dataType:(HttpRequestDataType)dataType
+                     tag:(int)reqTag
+{
+    if (reqTag == autoLoginReqTag)
+    {
+        //-------------自动登录成功--------------//
+        //1.保存登录后的用户信息
+        NSDictionary *loginUser = [result objectForKey:@"loginUser"];
+        [CommonUtils saveOrUpdateLoginUser:loginUser];
+        
+        //2.更新或保存用户token信息
+        NSString *token = [loginUser objectForKey:@"userUuid"];
+        [CommonUtils saveOrUpdateUserToken:token];
+    }
+    else if (reqTag == postClientidTag)
+    {
+        //上传clinetId和Uuid成功
+    }
+}
+
+#pragma mark 初始化window对象
+-(void)initWindow
+{
+    self.window = [[UIWindow alloc] initWithFrame:ScreenRect];
+    if ([self.window respondsToSelector:@selector(setRootViewController:)])
+    {
+        self.window.rootViewController = self.navController;
+    }
+    else
+    {
+        [self.window addSubview: self.navController.view];
+    }
+    self.window.backgroundColor = [UIColor clearColor];
+    [self.window makeKeyAndVisible];
+}
+
+
+#pragma  mark 添加友盟统计的支持
+-(void)startUmeng
+{
+    // reportPolicy为枚举类型,可以为 REALTIME, BATCH,SENDDAILY,SENDWIFIONLY几种
+    // channelId 为NSString * 类型，channelId 为nil或@""时,默认会被被当作@"App Store"渠
+    [MobClick startWithAppkey:umengAppkey reportPolicy:REALTIME channelId:nil];
+    
+    // 如果不需要捕捉异常，注释掉此行
+    [MobClick setCrashReportEnabled:NO];
+    
+    // 打开友盟sdk调试，注意Release发布时需要注释掉此行,减少io消耗
+    [MobClick setLogEnabled:YES];
+    
+    //参数为NSString * 类型,自定义app版本信息，如果不设置，默认从CFBundleVersion里取
+    [MobClick setAppVersion:XcodeAppVersion];
+    
+    //在线参数配置
+    [MobClick updateOnlineConfig];
+    
+    //在线参数是否完成完成监听
+    [WashcarDefaultCenter addObserver:self
+                           selector:@selector(onlineConfigCallBack:)
+                               name:UMOnlineConfigDidFinishedNotification
+                                object:nil];
+}
+
+#pragma mark 获取应用程序的appRootViewController
+-(UIViewController*)appRootViewController
+{
+    UIViewController* rootController;
+    if (PRE_IOS6)
+    {
+        NSArray *array = SharedApplication.windows;
+        UIWindow *win = [array objectAtIndex:0];
+        UIView *ui = [[win subviews] objectAtIndex:0];
+        rootController = (UIViewController*)[ui nextResponder];
+    }
+    else
+    {
+        rootController = SharedApplication.keyWindow.rootViewController;
+    }
+    return rootController;
+}
+
+#pragma mark 友盟回调方法
+- (void)onlineConfigCallBack:(NSNotification *)note
+{
+    APP_DebugLog(@"online config has fininshed and note = %@", note.userInfo);
+}
+
+#pragma mark 设置应用程序的配置参数
+-(void)configApplication
+{
+    SharedApplication.applicationIconBadgeNumber = 0;
+    [SharedApplication cancelAllLocalNotifications];
+    [SharedApplication setStatusBarHidden:NO];
+}
+
+#pragma mark 导航控制器
+-(UINavigationController*)navController
+{
+    if (!_navController)
+    {
+        
+        UIViewController *rootViewController;
+        [UserDefaults removeObjectForKey:@"is_app_first"];
+        if (![UserDefaults boolForKey:@"is_app_first"])
+        {
+            rootViewController = [[MainController alloc]init];
+        }
+        else
+        {
+            rootViewController = [[MainController alloc]init];
+        }
+        _navController = [[UINavigationController alloc]initWithRootViewController:rootViewController];
+        _navController.navigationBarHidden = YES;
+    }
+    return _navController;
+}
+
+#pragma mark 注册推送通知功能
+- (void) registerSysNotification
+{
+    #ifdef __IPHONE_8_0
+    if (IOS8)
+    {
+        UIUserNotificationSettings *uns = [UIUserNotificationSettings settingsForTypes:(UIUserNotificationTypeAlert|UIUserNotificationTypeBadge|UIUserNotificationTypeSound) categories:nil];
+        [SharedApplication registerForRemoteNotifications];
+        [SharedApplication registerUserNotificationSettings:uns];
+    } else
+    {
+        UIRemoteNotificationType apnTypes = (UIRemoteNotificationType)(UIRemoteNotificationTypeAlert|UIRemoteNotificationTypeSound|UIRemoteNotificationTypeBadge);
+        [SharedApplication registerForRemoteNotificationTypes:apnTypes];
+    }
+    #else
+    UIRemoteNotificationType apnTypes = (UIRemoteNotificationType)(UIRemoteNotificationTypeAlert|UIRemoteNotificationTypeSound|UIRemoteNotificationTypeBadge);
+    [SharedApplication registerForRemoteNotificationTypes:apnTypes];
+    #endif
+}
+
+#pragma mark 接受本地通知
+-(void)application:(UIApplication *)application didReceiveLocalNotification:(UILocalNotification *)notification
+{
+  
+    // 图标上的数字减1
+    //application.applicationIconBadgeNumber -= 1;
+    
+    //获取本地推送数组
+    NSArray *localArray = [SharedApplication scheduledLocalNotifications];
+    
+    //声明本地通知对象
+    UILocalNotification *localNotification;
+    
+    if (localArray)
+    {
+        for (UILocalNotification *noti in localArray)
+        {
+            NSDictionary *dict = noti.userInfo;
+            if (dict)
+            {
+                NSString *inKey = [dict objectForKey:@"key"];
+                if ([inKey isEqualToString:@"对应的key值"])
+                {
+                    if (localNotification)
+                    {
+                        localNotification = nil;
+                    }
+                    break;
+                }
+            }
+        }
+        //判断是否找到已经存在的相同key的推送
+        if (!localNotification)
+        {
+            //不存在初始化
+            localNotification = [[UILocalNotification alloc] init];
+        }
+        
+        if (localNotification)
+        {
+            //不推送 取消推送
+            [SharedApplication cancelLocalNotification:localNotification];
+        }
+    }
+
+}
+
+#pragma mark APNS注册成功
+-(void)application:(UIApplication *)application didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken
+{
+    NSString *token = [[deviceToken description] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"<>"]];
+    self.washcarDeviceToken = [token stringByReplacingOccurrencesOfString:@" " withString:@""];
+    if (self.gexinPusher)
+    {
+        [self.gexinPusher registerDeviceToken:self.washcarDeviceToken];
+    }
+}
+
+#pragma mark APNS注册失败
+- (void)application:(UIApplication *)application didFailToRegisterForRemoteNotificationsWithError:(NSError*)error
+{
+    if (self.gexinPusher)
+    {
+        [self.gexinPusher registerDeviceToken:@""];
+    }
+}
+
+#pragma mark 收到远程通知
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userinfo
+{
+    [SharedApplication cancelAllLocalNotifications];
+    SharedApplication.applicationIconBadgeNumber = (NSInteger)[[userinfo objectForKey:@"aps"] objectForKey:@"badge"];
+    NSString *payloadMsg = [userinfo objectForKey:@"payload"];
+    NSString *record = [NSString stringWithFormat:@"[APN]%@, %@", [NSDate date], payloadMsg];
+    APP_DebugLog(@"payloadMsg = %@",payloadMsg);
+    APP_DebugLog(@"record = %@",record);
+}
+
+#pragma mark 远程通知相关的回调方法
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo fetchCompletionHandler:(void (^)(UIBackgroundFetchResult result))completionHandler
+{
+    APP_DebugLog(@"didReceiveRemoteNotification");
+}
+
+- (void)applicationWillEnterForeground:(UIApplication *)application
+{
+    [SharedApplication setApplicationIconBadgeNumber:0];
+    [SharedApplication cancelAllLocalNotifications];
+}
+
+#pragma mark 远程通知相关的回调方法
+- (void)application:(UIApplication *)application performFetchWithCompletionHandler:(void (^)(UIBackgroundFetchResult result))completionHandler
+{
+    APP_DebugLog(@"performFetchWithCompletionHandler");
+}
+
+#pragma mark 远程通知相关的回调方法
+- (void)application:(UIApplication *)application handleEventsForBackgroundURLSession:(NSString *)identifier completionHandler:(void (^)())completionHandler
+{
+    APP_DebugLog(@"handleEventsForBackgroundURLSession");
+}
+
+
+#pragma mark 启动个信推送的apk
+- (void)startGXSDK
+{
+    if (!self.gexinPusher)
+    {
+        [self stopGXSDK];//启动前先停止
+        self.gxAppID = gexinKAppId;
+        self.gxAppKey = gexinKAppKey;
+        self.gxAppSecret = gexinKAppSecret;
+        self.gxAppVersion = gexinKAppVersion;
+        NSError *err;
+        self.gexinPusher = [GexinSdk createSdkWithAppId:self.gxAppID
+                                             appKey:self.gxAppKey
+                                          appSecret:self.gxAppSecret
+                                         appVersion:self.gxAppVersion
+                                           delegate:self
+                                              error:&err];
+        if (!self.gexinPusher)
+        {
+            APP_DebugLog(@"启动个信服务器失败....");
+        }
+        else
+        {
+            self.gxSdkStatus = SdkStatusStarting;
+            APP_DebugLog(@"启动个信服务器成功....");
+        }
+    }
+}
+
+#pragma mark 停止个信服务器
+- (void)stopGXSDK
+{
+    if (self.gexinPusher)
+    {
+        [self.gexinPusher destroy];
+        self.gexinPusher = nil;
+        self.gxSdkStatus = SdkStatusStoped;
+        self.gxClientId = nil;
+    }
+}
+
+#pragma mark 向个信服务器注册deviceid
+- (void)setDeviceToken:(NSString *)aToken
+{
+    if (![self checkSdkInstance])
+    {
+        return;
+    }
+    [self.gexinPusher registerDeviceToken:aToken];
+}
+
+#pragma mark 检查个信sdk
+- (BOOL)checkSdkInstance
+{
+    if (!self.gexinPusher)
+    {
+        [self showAlert:nil message:@"GXSDK未启动" type:AlertViewType_Alert];
+        return NO;
+    }
+    return YES;
+}
+
+#pragma mark 设置tags
+- (BOOL)setGXTags:(NSArray *)aTags error:(NSError **)error
+{
+    if (![self checkSdkInstance])
+    {
+        return NO;
+    }
+    return [self.gexinPusher setTags:aTags];
+}
+
+#pragma mark 发送个信消息给服务器
+- (NSString *)sendGXMessage:(NSData *)body error:(NSError **)error
+{
+    if (![self checkSdkInstance])
+    {
+        return nil;
+    }
+    return [self.gexinPusher sendMessage:body error:error];
+}
+
+#pragma mark 个信推送对应的回调方法
+- (void)GexinSdkDidRegisterClient:(NSString *)clientId
+{
+    self.gxSdkStatus = SdkStatusStarted;
+    self.gxClientId = clientId;
+    
+    __weak AppDelegate *selfDelegate = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *userClient = clientId;
+        NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:userClient,@"userClientID",nil];
+        [selfDelegate.httpClient doPostWithUrl:postClientIDUrl
+                                        params:params
+                                      dataType:json_data_type
+                                        reqTag:postClientidTag];
+    });
+    
+    APP_DebugLog(@"clientId is %@",self.gxClientId);
+}
+
+- (void)GexinSdkDidReceivePayload:(NSString *)payloadId fromApplication:(NSString *)appId
+{
+    self.gxpayloadId = payloadId;
+    
+    // 收到个推消息
+    NSData* payload = [self.gexinPusher retrivePayloadById:payloadId];
+    
+    NSString* payloadMsg = nil;
+    if (payload)
+    {
+        payloadMsg = [[NSString alloc] initWithBytes:payload.bytes length:payload.length encoding:NSUTF8StringEncoding];
+        
+        APP_DebugLog(@"payloadMsg - %@ , payloadId - %@",payloadMsg,payloadId);
+        dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
+        dispatch_async(queue, ^{
+            
+            // 对推送消息处理
+            [self analyzePayloadMsg:payloadMsg];
+        });
+    }
+    APP_DebugLog(@"GexinSdkDidReceivePayload:fromApplication was invoked");
+}
+
+- (void)GexinSdkDidSendMessage:(NSString *)messageId result:(int)result
+{
+    APP_DebugLog(@"GexinSdkDidSendMessage:result: method was invoked");
+}
+
+- (void)GexinSdkDidOccurError:(NSError *)error
+{
+    APP_DebugLog(@"GexinSdkDidOccurError method was invoked");
+}
+
+#pragma mark 系统进入后台
+- (void)applicationDidEnterBackground:(UIApplication *)application
+{
+    [self stopGXSDK];
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application
+{
+    // 重新上线
+    [self startGXSDK];
+}
+
+#pragma mark 初始化百度地图相关的api对象
+-(BMKMapManager *)mapManager
+{
+    if (!_mapManager)
+    {
+        _mapManager = [[BMKMapManager alloc]init];
+    }
+    return _mapManager;
+}
+
+#pragma mark 启动百度地图
+-(BOOL)startBDMap
+{
+    BOOL result = [self.mapManager start:baiduMapKey generalDelegate:self];
+    if (!result)
+    {
+        APP_DebugLog(@"启动百度地图失败");
+    }
+    else
+    {
+        APP_DebugLog(@"启动百度地图成功");
+    }
+    return result;
+}
+
+#pragma mark BMKGeneralDelegate代理方法
+- (void)onGetNetworkState:(int)iError
+{
+    if (0 == iError)
+    {
+        APP_DebugLog(@"联网成功");
+    }
+    else
+    {
+        APP_DebugLog(@"onGetNetworkState %d",iError);
+    }
+    
+}
+
+- (void)onGetPermissionState:(int)iError
+{
+    if (0 == iError)
+    {
+        APP_DebugLog(@"授权成功");
+    }
+    else
+    {
+        APP_DebugLog(@"onGetPermissionState %d",iError);
+    }
+}
+
+#pragma 收到内存警告
+-(void)applicationDidReceiveMemoryWarning:(UIApplication *)application
+{
+    [WashcarDefaultCenter removeObserver:self];
+    _mapManager = nil;
+    [self stopGXSDK];
+}
+
+#pragma mark 弹框显示－－带标题
+-(void)showAlert:(NSString*)title message:(NSString*)message type:(AlertViewType)type
+{
+    if (type == AlertViewType_Alert)
+    {
+        DXAlertView *alert = [[DXAlertView alloc] initWithTitle:title
+                                                    contentText:message
+                                                leftButtonTitle:cancelBtnText
+                                               rightButtonTitle:nil];
+        [alert show];
+    }
+    else
+    {
+        [[ApplicationDelegate window] makeToast:message duration:2.0 position:CSToastPositionCenter title:title image:nil];
+    }
+}
+
+#pragma mark 弹框显示－－不带标题
+-(void)showAlert:(NSString*)message type:(AlertViewType)type
+{
+    [self showAlert:nil message:message type:type];
+}
+
+#pragma mark 弹框显示－－带标题
+-(void)showAlertWithTowBtns:(NSString*)title message:(NSString*)message doneBtnFinishBlock:(void(^)(void))doneBtnFinishBlock
+{
+    
+    DXAlertView *alert = [[DXAlertView alloc] initWithTitle:title
+                                                contentText:message
+                                            leftButtonTitle:@"取消"
+                                           rightButtonTitle:@"确定"];
+    alert.rightBlock = doneBtnFinishBlock;
+    [alert show];
+}
+
+#pragma mark - 推送消息提示声
+- (void) PlaySystemSound
+{
+    NSString* soundName = @"sms-received1";
+    NSString* soundType = @"caf";
+    // 本地系统音频
+    NSString *path = [NSString stringWithFormat:@"/System/Library/Audio/UISounds/%@.%@",soundName,soundType];
+    if (path)
+    {
+        OSStatus error = AudioServicesCreateSystemSoundID((__bridge CFURLRef)[NSURL fileURLWithPath:path],&sound);
+        
+        if (error != kAudioServicesNoError)
+        {//获取的声音的时候，出现错误
+            APP_DebugLog(@"获取的声音的时候，出现错误");
+        }
+    }
+    // 播放声音
+    AudioServicesPlaySystemSound(sound);
+    // 手机震动
+    AudioServicesPlaySystemSound(kSystemSoundID_Vibrate);
+}
+
+#pragma mark - 缓存到数据库
+- (void)cacheToLocalWithTitle:(NSString*)titleStr content:(NSString*)contentStr type:(int) type
+{
+    GXModel* model = [[GXModel alloc] init];
+    GXDao* dao = [[GXDao alloc] init];
+    model.noticeContent = contentStr;
+    model.noticeType = [NSString stringWithFormat:@"%d",type];
+    model.noticeTitle = titleStr;
+    model.noticeIsRead = NO;
+    model.noticeTime = [NSString stringWithFormat:@"%@",[NSDate date]];
+    [dao saveGXNotice:model];
+}
+
+- (void) analyzePayloadMsg:(NSString*)payloadMsg
+{
+    // 1.截取个推消息
+    NSArray* arr = [payloadMsg componentsSeparatedByString:@"&"];
+    NSArray* typeArray;
+    NSArray* titleArray;
+    NSArray* contentArray;
+    if ([arr count] >= 3)
+    {
+        typeArray = [[arr objectAtIndex:0] componentsSeparatedByString:@"="];
+        titleArray = [[arr objectAtIndex:1] componentsSeparatedByString:@"="];
+        contentArray = [[arr objectAtIndex:2] componentsSeparatedByString:@"="];
+    }
+    // 类型
+    int type;
+    if ([typeArray count] >= 2)
+    {
+        type = [[typeArray objectAtIndex:1] intValue];
+    }
+    // 标题
+    NSString* titleStr;
+    if ([titleArray count] >= 2)
+    {
+        titleStr = [titleArray objectAtIndex:1];
+    }
+    // 正文
+    NSString* contentStr;
+    if ([contentArray count] >= 2)
+    {
+        contentStr = [contentArray objectAtIndex:1];
+    }
+    
+    // 2.消息缓存到数据库
+    [self cacheToLocalWithTitle:titleStr content:contentStr type:type];
+    
+    // 3.播放声音
+    [self PlaySystemSound];
+    
+    switch (type) {
+        case PayloadMsgType_StatusChangeMsg:
+        {
+            // 101状态通知
+            // tilte=订单号，content=状态，多个参数的用逗号分开，目前适用于一个参数
+            [WashcarDefaultCenter postNotificationName:WashcarUpdateOrderStatusNotification object:nil];
+            [WashcarDefaultCenter postNotificationName:WashcarTipViewUpdateNotification object:nil];
+            break;
+        }
+        case PayloadMsgType_SendordersMsg:
+        {
+            // 102派单消息
+            // title=订单号，content=派单时间
+            break;
+        }
+        case PayloadMsgType_NormalMsg:
+        {
+            // 1普通消息（含标题和内容）
+            // title是标题，content是内容
+            break;
+        }
+        case PayloadMsgType_PicMsg:
+        {
+            // 2图片消息
+            break;
+        }
+        case PayloadMsgType_LinkMsg:
+        {
+            // 3链接消息
+            break;
+        }
+        default:
+            break;
+    }
+
+}
+@end

@@ -1,0 +1,50 @@
+//
+//  MainController.h
+//  WashCar
+//
+//  Created by yanshengli on 14-12-19.
+//  Copyright (c) 2014年 cheletong. All rights reserved.
+//
+
+#import "BaseController.h"
+#import "CustBgViewWidget.h"
+#import "TapImageViewWidget.h"
+
+/***
+ *
+ *@description:主页面对应的控制器--接口
+ *@author:liys
+ *@since:2014-1-6
+ *@corp:cheletong
+ */
+@interface MainController : BaseController
+{
+    //头部
+    UILabel *_addresslb;  //地址
+    TapImageViewWidget *_callServiceBtn;//联系客服按钮
+    CustBgViewWidget *_headView;//头部视图
+    
+    //中间
+    UIImageView *_runManImgView; //跑男图
+    UIButton *_callRunManBtn; //呼叫跑男
+    UIView *_centerView;//中间视图
+    
+    //有订单的提示视图
+    UIView *_orderTipView;
+    UILabel *_orderTiplb;
+    
+    //地图定位service
+    BMKLocationService *_locService;
+    BMKGeoCodeSearch *_geoCodeSearch;
+}
+
+#pragma mark 存放地址和流程演示按钮的头部视图
+@property (nonatomic,strong,readonly)UIView *headView;
+
+#pragma mark 中间视图
+@property (nonatomic,strong,readonly)UIView *centerView;
+
+#pragma mark 有订单的提示视图
+@property (nonatomic,strong,readonly)UIView *orderTipView;
+
+@end

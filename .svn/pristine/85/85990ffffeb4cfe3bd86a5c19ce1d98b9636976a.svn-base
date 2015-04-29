@@ -1,0 +1,180 @@
+//
+//  BaseController.h
+//  NaChe
+//
+//  Created by apple on 14/10/19.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import <UIKit/UIKit.h>
+#import "MBProgressHUD.h"
+#import "NavBarViewWidget.h"
+#import "HttpRequestClient.h"
+#import "BaseNaviBarWidget.h"
+#import "UIViewController+animation.h"
+#import "ZBarSymbol.h"
+#import "ZBarReaderController.h"
+#import "ZBarReaderViewController.h"
+#import "QRcodeScanController.h"
+#import "NavBarInfoModel.h"
+#import "AppDelegate.h"
+
+/***
+ *
+ *@description:所有控制器类的父类
+ *@author:liys
+ *@since:2014-12-25
+ *@corp:cheletong
+ */
+@interface BaseController : UIViewController
+{
+    BOOL isloading;//是否正在网络请求中
+    BOOL showErrWithToast;//提示信息用Toast方式还是Alert方式,默认是alert方式
+    BOOL needLogin;//是否需要登录
+    MBProgressHUD *_HUD;//加载视图
+    HttpRequestClient *_httpClient;//http请求
+    NSDictionary *_reqParams;//传给控制器的请求参数
+    QRcodeScanController *_qrScanController;//二维码扫描
+    ZBarReaderController *_zBarReader;//二维码扫描视图
+}
+
+#pragma mark 属性
+@property (nonatomic,assign) BOOL isloading;
+@property (nonatomic,assign) BOOL showErrWithToast;
+@property (nonatomic,assign) BOOL needLogin;
+@property (nonatomic,strong,readonly) MBProgressHUD *HUD;
+@property (nonatomic,strong,readonly) HttpRequestClient *httpClient;
+@property (nonatomic,strong) NSDictionary *reqParams;
+@property (nonatomic,strong,readonly)QRcodeScanController *qrScanController;
+@property (nonatomic,strong,readonly)ZBarReaderController *zBarReader;
+
+//~~~~~~~~~~~页面回退操作~~~~~~~~~//
+#pragma mark 返回上一页
+-(void) gotoBack:(UIButton *)sender;
+
+//~~~~~~~~~~~页面数据加载~~~~~~~~~//
+#pragma mark 重新加载页面数据
+-(void) reloadController:(UIViewController *)controller;
+
+//~~~~~~~~~~~页面键盘相关~~~~~~~~~//
+#pragma 隐藏或显示键盘
+-(void) moveView:(UITextField *)textField leaveView:(BOOL)leave;
+
+//~~~~~~~~~~~导航相关~~~~~~~~~~~~~~//
+#pragma 获取导航栏
+-(BaseNaviBarWidget*)navBar;
+
+#pragma mark 获取导航栏信息
+-(NavBarInfoModel*)navBarInfo;
+
+//~~~~~~~~~~~设置背景颜色~~~~~~~~~~~~~~//
+#pragma mark 设置控制器的背景颜色
+-(void)setControllerBgColor;
+
+
+//~~~~~~~~~~~http请求相关~~~~~~~~~//
+#pragma mark 发送http post请求
+-(void) doPost:(NSString *)url params:(NSDictionary *)params;
+-(void) doPost:(NSString *)url params:(NSDictionary *)params tag:(int)reqTag;
+-(void) doPost:(NSString *)url params:(NSDictionary *)params tag:(int)reqTag showProgress:(BOOL)showProgress;
+
+#pragma 上传图片
+-(void) uploadImage:(NSString *) url image:(UIImage *)image params:(NSDictionary *) params tag:(int)reqTAg;
+
+#pragma mark 请求成功后回调该函数
+-(void) handleRespResult:(NSDictionary*)result tag:(int)reqTag;
+
+#pragma mark 错误码处理，返回yes代表需要弹出提示
+-(BOOL) handleErrorCode:(int)code info:(NSString *)info tag:(int)reqTag;
+
+#pragma mark 图片或者文件上传回调
+-(void) uploadProgressWithFinishedBytes:(long long)finishedBytes totalBytes:(long long)totalBytes;
+
+
+//~~~~~~~~~~~加载视图~~~~~~~~~~~~~//
+#pragma mark 开始加载
+-(void) beginLoading:(NSString*)title view:(UIView*)view;
+
+#pragma mark 结束加载
+-(void) stopLoading;
+
+
+//~~~~~~~~~~~页面跳转动画相关~~~~~~~~~//
+#pragma mark - 自上而下推进视图控制器的动画效果
+- (void)pushViewControllerFromTop:(UIViewController *)viewController;
+
+#pragma mark - 自上而下推出视图控制器的动画效果
+- (void)popViewControllerFromTop;
+
+#pragma mark - 自下而上推进视图控制器的动画效果
+- (void)pushViewControllerFromBottom:(UIViewController *)viewController;
+
+#pragma mark - 自下而上推出视图控制器的动画效果
+- (void)popViewControllerFromBottom;
+
+#pragma mark 自左而右的推进视图控制器
+-(void)pushViewControllerFromLeft:(UIViewController*)viewController;
+
+#pragma mark 自左而右的推出视图控制器
+-(void)popViewControllerFromLeft;
+
+#pragma mark 自右而左的推进视图控制器
+-(void)pushViewControllerFromRight:(UIViewController*)viewController;
+
+#pragma mark 自左而右的推出视图控制器
+-(void)popViewControllerFromRight;
+
+#pragma mark 跳转到根控制器
+-(void)popToRootViewController;
+
+
+//~~~~~~~~~~~手势相关~~~~~~~~~~~~~~~~//
+#pragma mark 处理Swipe手势
+-(void) handleSwipeGesture:(UISwipeGestureRecognizer *)gesture;
+
+#pragma mark 处理Tap手势
+-(void) handleTapGesture:(UITapGestureRecognizer *)gesture;
+
+#pragma mark 处理pan手势情况
+-(void) handlePanGesture:(UIPanGestureRecognizer*)gesture;
+
+#pragma mark 是否需要添加TapGesture
+-(BOOL) needAddTapGesture;
+
+#pragma mark 是否需要添加PanGesture
+-(BOOL) needAddPanGesture;
+
+#pragma mark 是否需要添加SwipeGesture
+-(BOOL) needAddSwipeGesture;
+
+
+//~~~~~~~~~~~~~弹框~~~~~~~~~~~~~~~~~~~~//
+#pragma mark 显示消息框--不带标题
+-(void)showAlert:(NSString*)message type:(AlertViewType)type;
+
+#pragma mark 显示消息框--带标题
+-(void)showAlert:(NSString*)title message:(NSString*)message type:(AlertViewType)type;
+
+#pragma mark 显示警示框--带两个按钮
+-(void)showAlertWithTowBtns:(NSString*)title message:(NSString*)message doneBtnFinishBlock:(void(^)(void))doneBtnFinishBlock;
+
+
+//~~~~~~~~~~~~~从图库中获取照片或者是拍摄相关的处理方法~~~~~~~~~~~~~~~~//
+#pragma mark 是否有拍照的权限
+-(BOOL)hasAvAuthority;
+
+#pragma mark 从相机或者相册中获取图片
+-(void)pickImages:(NSString*)title;
+
+#pragma mark 处理获取到的图片--(子类覆盖)
+-(void)handlePickImages:(NSMutableArray *)images;
+
+
+//~~~~~~~~~~~~~~~~~~~二维码扫描相关的处理方法~~~~~~~~~~~~~~~~~~~~~~~~~~//
+#pragma 扫描二维码
+-(void)QRScan;
+
+#pragma 二维码扫描结果
+-(void)QRCodeScanResult:(NSString*)scanRsStr;
+
+@end

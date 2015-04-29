@@ -1,0 +1,35 @@
+//
+//  OrderDaoModel.h
+//  WashCar
+//
+//  Created by yanshengli on 15-1-14.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "BaseDaoModel.h"
+
+/***
+ *
+ *@description:订单实体类--接口
+ *@since:2015-1-14
+ *@author:liys
+ *
+ */
+@interface OrderDaoModel : BaseDaoModel
+#pragma mark 订单号
+@property(nonatomic,copy)NSString *orderNo;
+#pragma mark 下单时间
+@property(nonatomic,copy)NSString *orderTime;
+#pragma mark 接单时间
+@property(nonatomic,copy)NSString *receivedTime;
+#pragma mark 到达停车位的时间
+@property(nonatomic,copy)NSString *arrivalTime;
+#pragma mark 开始洗车的时间
+@property(nonatomic,copy)NSString *washingTime;
+#pragma mark 洗车完成的时间
+@property(nonatomic,copy)NSString *finishedTime;
+#pragma mark 确认洗车完成的时间
+@property(nonatomic,copy)NSString *confirmTime;
+#pragma mark 订单状态
+@property(nonatomic,copy)NSString *status;
+@end

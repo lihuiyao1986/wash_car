@@ -1,0 +1,98 @@
+//
+//  OrderDao.m
+//  WashCar
+//
+//  Created by yanshengli on 15-1-14.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import "OrderDao.h"
+#import "OrderDaoModel.h"
+#import "NSObject+Utility.h"
+#import "NSString+Utility.h"
+#import "TablePropertyModel.h"
+
+/***
+ *
+ *@description:订单操作对应的DAO--实现
+ *@since:2015-1-14
+ *@author:liys
+ *
+ */
+@implementation OrderDao
+
+#pragma mark 保存或更新订单
+-(void)saveOrder:(OrderDaoModel*)order
+{
+    if ([self createTableByClass:[self tableClass]])
+    {
+        [self executeUpdate:[self baseSaveSql:order] dictParams:[order toDicIncludeSuper:YES]];
+    }
+}
+
+#pragma mark 删除所有的订单
+-(void)deleteAllOrder
+{
+    NSString *sql = [NSString stringWithFormat:@"delete from %@",[self tableName]];
+    [self executeUpdate:sql dictParams:nil];
+}
+
+
+#pragma mark 查询有效的订单信息--根据手机号
+-(NSMutableArray*)queryValidOrderByMobileno:(NSString *)mobileno
+{
+    //1.查询的sql
+    NSString *sql = [NSString stringWithFormat:@"select * from %@ where mobile = :mobile",[self tableName]];
+    
+    //2.组装查询参数
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithInt:WashCarOrderValid_Valid],@"valid",[mobileno trimNull],@"mobile", nil];
+    
+    //3.执行查询，并返回
+    return [self query:sql dictParams:params];
+}
+
+#pragma mark 根据订单号更新订单信息
+-(void)updateOrderByOrderNo:(OrderDaoModel*)order orderNo:(NSString*)orderNo
+{
+    if ([self createTableByClass:[self tableClass]])
+    {
+        NSMutableDictionary *orderInfo = [self queryOrderByOrderNo:orderNo];
+        if (orderInfo && orderInfo.count > 0)
+        {
+            NSMutableString *sql = [self baseUpdateSql:order];
+            [sql appendFormat:@" where orderNo = :conditionOrderNo"];
+            NSMutableDictionary *paramsDict = [NSMutableDictionary dictionaryWithObjectsAndKeys:[orderNo trimNull],@"conditionOrderNo", nil];
+            [paramsDict addEntriesFromDictionary:[order toDicIncludeSuper:YES skipNull:YES]];
+            [self executeUpdate:sql dictParams:paramsDict];
+        }
+    }
+}
+
+#pragma mark 查询所有的订单信息
+-(NSMutableArray*)queryAllOrders
+{
+    NSString *sql = [NSString stringWithFormat:@"select * from %@ order by id ",[self tableName]];
+    return [self query:sql dictParams:nil];
+}
+
+#pragma mark 根据订单号查询订单
+-(NSMutableDictionary*)queryOrderByOrderNo:(NSString*)orderNo
+{
+    NSString *sql = [NSString stringWithFormat:@"select * from %@ where orderNo = :orderNo",NSStringFromClass([self tableClass])];
+    NSDictionary *paramsDict = [NSDictionary dictionaryWithObjectsAndKeys:[orderNo trimNull],@"orderNo", nil];
+    NSMutableArray *results = [self query:sql dictParams:paramsDict];
+    if (results && results.count >0)
+    {
+        return [results firstObject];
+    }
+    else
+    {
+        return nil;
+    }
+}
+
+#pragma mark 获取表结构对应的类对象
+-(Class)tableClass{
+    return [OrderDaoModel class];
+}
+@end

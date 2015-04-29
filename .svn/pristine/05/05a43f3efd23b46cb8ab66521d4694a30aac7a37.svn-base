@@ -1,0 +1,309 @@
+//
+//  CommonUtils.m
+//  NaChe
+//
+//  Created by nachebang on 14-10-30.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import "CommonUtils.h"
+#import "KeychainItemWrapper.h"
+#import "Md5Utils.h"
+#import "OpenUDID.h"
+#import "NSString+Utility.h"
+#import "ColorButton.h"
+
+@implementation CommonUtils
+
+//获取发送给服务端请求的随机数(随机数范围在1～1000)
++(NSNumber*)obtainReqRandom{
+   return [NSNumber numberWithInteger:arc4random_uniform(999)+1];
+}
+
+//保存手机唯一标识（保存在keychain）
++(void)insertMobileUUID{
+    KeychainItemWrapper *wrap = [[KeychainItemWrapper alloc]initWithIdentifier:MOBILE_UUID_IDENTIFIER_KEY accessGroup:MOBILE_UUID_IDENTIFIER_GROUP];
+    NSString *mobileUUID = [wrap objectForKey:(__bridge id)(kSecAttrAccount)];
+    if(mobileUUID == NULL || [mobileUUID isEqualToString:@""]){
+        [wrap setObject:[Md5Utils md5:[OpenUDID value]] forKey:(__bridge id)(kSecAttrAccount)];
+    }
+}
+
+//获取手机的唯一标识
++(NSString*)mobileUUID{
+    KeychainItemWrapper *wrap = [[KeychainItemWrapper alloc]initWithIdentifier:MOBILE_UUID_IDENTIFIER_KEY accessGroup:MOBILE_UUID_IDENTIFIER_GROUP];
+    NSString *mobileUUID = [wrap objectForKey:(__bridge id)(kSecAttrAccount)];
+    return mobileUUID;
+}
+
+//获取用户的token信息
++(NSString*)userToken
+{
+    NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+    NSString *userToken = [userDefault valueForKey:@"USER_TOKEN"];
+    return userToken ? userToken : @"";
+}
+
+//获取登录之后的用户信息
++(NSDictionary*)loginUser
+{
+    return [UserDefaults objectForKey:@"USER_LOGIN_OBJ"];
+}
+
+//保存新的用户token信息
++(void)saveOrUpdateUserToken:(NSString *)newToken
+{
+    [UserDefaults setObject: newToken forKey:@"USER_TOKEN"];
+    [UserDefaults synchronize];
+}
+
+//保存登录后的用户信息
++(void)saveOrUpdateLoginUser:(NSDictionary*)loginUser
+{
+    [UserDefaults setObject: loginUser forKey:@"USER_LOGIN_OBJ"];
+    [UserDefaults synchronize];
+}
+
+//删除用户的token信息
++(void)deleteUserLoginToken
+{
+    [UserDefaults setObject:@"" forKey:@"USER_TOKEN"];
+    [UserDefaults synchronize];
+}
+
+//删除登录后的用户信息
++(void)deleteLoginUser
+{
+    [UserDefaults setObject: nil forKey:@"USER_LOGIN_OBJ"];
+    [UserDefaults synchronize];
+}
+
+#pragma 动画
++ (void)viewAnimation:(UIView*)view willHidden:(BOOL)hidden
+{
+    [UIView animateWithDuration:0.3 animations:^{
+        if (hidden) {
+            view.frame = CGRectMake(0, SCREEN_HEIGHT, SCREEN_WIDTH, 260);
+        } else {
+            [view setHidden:hidden];
+            view.frame  = CGRectMake(0, SCREEN_HEIGHT-180, SCREEN_WIDTH, 260);
+        }
+    } completion:^(BOOL finished) {
+        [view setHidden:hidden];
+    }];
+}
+
+#pragma 从资源文件中获取数据
++ (NSArray *)retrieveDataSourceFromPath:(NSString *)resourceName ofType:(NSString *)resourceType atRootKeyPath:(NSString *)keyPath
+{
+    NSString *dataSourcePath = [[NSBundle mainBundle] pathForResource:resourceName ofType:resourceType];
+    NSData *dataSourceData = [[NSData alloc] initWithContentsOfFile:dataSourcePath];
+    
+    NSError *error;
+    id dataSourceJSON = [NSJSONSerialization JSONObjectWithData:dataSourceData options:NSJSONReadingAllowFragments error:&error];
+    NSDictionary *deserializedDataSourceDict = (NSDictionary *)dataSourceJSON;
+    NSArray *itemsByCategory = [deserializedDataSourceDict valueForKey:keyPath];
+    
+    return itemsByCategory;
+}
+
+#pragma 视图截图
++ (UIImage*)saveSnapshotInView:(UIView *)view withSize:(CGSize)size
+{
+    UIGraphicsBeginImageContext(size);
+    [view.layer renderInContext:UIGraphicsGetCurrentContext()];
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    NSData *imgData = UIImageJPEGRepresentation(image, 0.5);
+    return [[UIImage alloc]initWithData:imgData];
+}
+
+#pragma 视图截屏
++ (UIImage*)saveSnapshotInView:(UIView *)view
+{
+    return [CommonUtils saveSnapshotInView:view withSize:view.frame.size];
+}
+
+#pragma 图片大小重置
++ (UIImage *)resizeImage:(UIImage *)image toTargetSize:(CGSize)size
+{
+    if (NULL!= UIGraphicsBeginImageContextWithOptions)
+    {
+        UIGraphicsBeginImageContextWithOptions(size, NO, 0);
+    }
+    
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    
+    CGContextTranslateCTM(context, 0.0, size.height);
+    CGContextScaleCTM(context, 1.0, -1.0);
+
+    CGContextSetBlendMode(context, kCGBlendModeCopy);
+    CGContextDrawImage(context, CGRectMake(0.0, 0.0, size.width, size.height), image.CGImage);
+ 
+    
+    UIImage *imageOut = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return imageOut;
+}
+
+#pragma 打开对应的url
++(void)openUrl:(NSString*)url urltype:(URLTYPE)urlType
+{
+    switch (urlType)
+    {
+        case MAPURL:case WEBURL:
+            if(![url hasPrefix:@"http://"] || ![url hasPrefix:@"https://"])
+            {
+                url = [NSString stringWithFormat:@"%@%@",@"http://",url];
+            }
+            break;
+        case TELURL:
+            if (![url hasPrefix:@"tel://"]) {
+                url = [NSString stringWithFormat:@"%@%@",@"tel://",url];
+            }
+            break;
+        case SMSURL:
+            if (![url hasPrefix:@"sms://"]) {
+                url = [NSString stringWithFormat:@"%@%@",@"sms://",url];
+            }
+            break;
+        case EMAILURL:
+            if (![url hasPrefix:@"mailto://"]) {
+                 url = [NSString stringWithFormat:@"%@%@",@"mailto://",url];
+            }
+        default:
+            break;
+    }
+    [SharedApplication openURL:[NSURL URLWithString:url]];
+}
+
+#pragma 重置uitableviewcell的contentview
++ (void)resetTableCellContentSubviews:(UITableViewCell*)tableviewCell{
+    for (UIView *subview in tableviewCell.contentView.subviews) {
+        [subview removeFromSuperview];
+    }
+}
+
+#pragma 去除父视图中所有的子视图
++ (void)removeSubviews:(UIView*)view{
+    for (UIView *subView in view.subviews) {
+        [subView removeFromSuperview];
+    }
+}
+
+#pragma 对视图使用动画
++ (void)animationView:(UIView *)changeView withFrame:(CGRect)frame animation:(CGFloat )animation{
+    [UIView beginAnimations:@"animation" context:nil];
+    [UIView setAnimationDuration:animation];
+    [UIView setAnimationCurve:UIViewAnimationCurveEaseInOut];
+    changeView.frame = frame;
+    [UIView setAnimationTransition:UIViewAnimationTransitionNone forView:changeView cache:YES];
+    [UIView commitAnimations];
+}
+
+#pragma 计算字符串长度
++ (int)textLength:(NSString *)text
+{
+    if (text == nil) {
+        return 0;
+    }
+    float number = 0.0;
+    for (int index = 0; index < [text length]; index++)
+    {
+        NSString *character = [text substringWithRange:NSMakeRange(index, 1)];
+        if ([character lengthOfBytesUsingEncoding:NSUTF8StringEncoding] == 3)
+        {
+            number++;
+        }
+        else
+        {
+            number = number + 0.5;
+        }
+    }
+    //英文字條件
+    NSRegularExpression *tLetterRegularExpression = [NSRegularExpression regularExpressionWithPattern:@"[A-Za-z]" options:NSRegularExpressionCaseInsensitive error:nil];
+    //符合英文字條件的有幾個字元
+    NSInteger tLetterMatchCount = [tLetterRegularExpression numberOfMatchesInString:text options:NSMatchingReportProgress range:NSMakeRange(0, text.length)];
+    number = number + tLetterMatchCount * 0.5;
+    return ceil(number);
+}
+
+#pragma 显示本地通知
++ (void)showNotificationWithAction:(NSString *)action andContent:(NSString *)content
+{
+    UILocalNotification *notification = [[UILocalNotification alloc] init];
+    notification.alertBody = content;
+    notification.alertAction = action;
+    notification.applicationIconBadgeNumber = 1;
+    notification.soundName = UILocalNotificationDefaultSoundName;
+    [SharedApplication presentLocalNotificationNow:notification];
+}
+
+#pragma 获取xmpp对应的用户id
++ (NSString *)getXmppUserid{
+    return [UserDefaults objectForKey:@"xmppUserId"];
+}
+
+#pragma 获取xmpp对应的密码
++ (NSString *)getXmppPassword{
+    return [UserDefaults objectForKey:@"xmppPwd"];
+}
+
+#pragma 获取xmpp的服务器地址
++ (NSString *)getXmppHostName{
+    return [UserDefaults objectForKey:@"xmppServer"];
+}
+
+#pragma 获取nativePageConfig数据
++ (NSMutableDictionary*)nativePageConfig{
+    NSString *plistPath = [Bundle pathForResource:@"NativePageConfig" ofType:@"plist"];
+    NSMutableDictionary *data = [[NSMutableDictionary alloc] initWithContentsOfFile:plistPath];
+    return data;
+}
+
+#pragma mark 判断字符串是否为空
++ (BOOL)isStrEmpty:(NSString*)str
+{
+    if (str == nil || str == NULL)
+    {
+        return YES;
+    }
+    if ([str isKindOfClass:[NSNull class]])
+    {
+        return YES;
+    }
+    if ([str trimNull].length <= 0)
+    {
+        return YES;
+    }
+    return NO;
+}
+
+#pragma mark 获取washCarBtn
++(UIButton*)washCarBtn:(CGRect)frame
+{
+    NSMutableArray *colorArray1 = [@[hexColor(0x4da6e5, 1.0),hexColor(0x4193cd, 1.0)] mutableCopy];
+    UIButton *btn = [[ColorButton alloc]initWithFrame:frame
+                                       FromColorArray:colorArray1
+                                       ByGradientType:topToBottom
+                                         disableColor:RGB_TextColor_C14];
+    [btn setTitleColor:RGB_TextColor_C0 forState:UIControlStateNormal];
+    [btn setTitleColor:RGB_TextColor_C0 forState:UIControlStateHighlighted];
+    [btn setTitleColor:RGB_TextColor_C0 forState:UIControlStateSelected];
+    return btn;
+}
+
+#pragma mark 是否有订单的状态
++(BOOL)hasOrderStatus
+{
+    return [[UserDefaults objectForKey:@"HAS_ORDER_STATUS_FLAG"] boolValue];
+}
+
+#pragma mark 保存或更新是否有订单的状态
++(void)saveOrUpdateOrderStatus:(BOOL)status
+{
+    [UserDefaults setObject:[NSNumber numberWithBool:status] forKey:@"HAS_ORDER_STATUS_FLAG"];
+    [UserDefaults synchronize];
+}
+
+@end

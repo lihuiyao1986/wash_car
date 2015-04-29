@@ -1,0 +1,97 @@
+//
+//  AppDelegate.h
+//  NaChe
+//
+//  Created by apple on 14/10/19.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import <UIKit/UIKit.h>
+#import "GexinSdk.h"
+#import "BMapKit.h"
+#import "MyReachability.h"
+#import "HttpRequestClient.h"
+#import <AudioToolbox/AudioToolbox.h>
+
+#pragma mark sdk启动状态枚举
+typedef enum
+{
+    SdkStatusStoped = 0,
+    SdkStatusStarting = 1,
+    SdkStatusStarted = 2
+} SdkStatus;
+
+
+#pragma mark alertview弹框类型枚举
+typedef NS_ENUM(NSInteger, AlertViewType)
+{
+    AlertViewType_Alert  = 0,//alert
+    AlertViewType_Toast  = 1,//toast
+};
+
+@interface AppDelegate : UIResponder <UIApplicationDelegate>
+{
+    //窗体对象
+    UIWindow *_window;
+    //百度地图相关
+    BMKMapManager *_mapManager;
+    //网络连接状态
+    NetworkStatus _currNetStatus;
+    //导航控制器
+    UINavigationController *_navController;
+    //http请求对象
+    HttpRequestClient *_httpClient;
+    //播放推送声音对象
+    SystemSoundID sound;
+}
+#pragma mark 窗体对象
+@property (nonatomic,strong)UIWindow *window;
+
+#pragma mark 导航控制器
+@property (nonatomic,strong)UINavigationController *navController;
+
+#pragma mark httpClient对象
+@property (nonatomic,strong,readonly)HttpRequestClient *httpClient;
+
+#pragma mark 设备token
+@property (nonatomic,copy)NSString *washcarDeviceToken;
+
+#pragma mark 个性推送的属性
+@property (strong, nonatomic)GexinSdk *gexinPusher;
+@property (copy, nonatomic) NSString *gxAppKey;
+@property (copy, nonatomic) NSString *gxAppSecret;
+@property (copy, nonatomic) NSString *gxAppID;
+@property (copy, nonatomic) NSString *gxClientId;
+@property (assign, nonatomic) SdkStatus gxSdkStatus;
+@property (assign, nonatomic) int lastPayloadIndex;
+@property (copy, nonatomic) NSString *gxAppVersion;
+@property (copy, nonatomic) NSString *gxpayloadId;
+
+#pragma mark 个性推送的方法
+- (void)startGXSDK;
+- (void)stopGXSDK;
+- (void)setDeviceToken:(NSString *)aToken;
+- (BOOL)setGXTags:(NSArray *)aTag error:(NSError **)error;
+- (NSString *)sendGXMessage:(NSData *)body error:(NSError **)error;
+
+#pragma mark 百度地图相关
+@property (nonatomic,strong) BMKMapManager *mapManager;
+
+#pragma mark 网络连接状态
+@property (nonatomic,assign) NetworkStatus currNetStatus;
+
+#pragma mark 弹框显示 -- 带标题
+-(void)showAlert:(NSString*)title message:(NSString*)message type:(AlertViewType)type;
+
+#pragma mark 弹框显示 -- 不带标题
+-(void)showAlert:(NSString*)message type:(AlertViewType)type;
+
+#pragma mark 弹出两个按钮－－带标题
+-(void)showAlertWithTowBtns:(NSString*)title message:(NSString*)message doneBtnFinishBlock:(void(^)(void))doneBtnFinishBlock;
+
+#pragma mark 判断网络链接状况
+- (BOOL)connectedToNetwork;
+
+#pragma mark 获取应用程序的appRootViewController
+-(UIViewController*)appRootViewController;
+@end

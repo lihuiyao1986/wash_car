@@ -1,0 +1,1032 @@
+//
+//  BaseController.m
+//  NaChe
+//
+//  Created by apple on 14/10/19.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import "BaseController.h"
+#import "MBProgressHUD.h"
+#import "NavBarViewWidget.h" 
+#import "MobClick.h"
+#import "UIView+Toast.h"
+#import "NSString+Utility.h"
+#import "LoginController.h"
+#import "PECropViewController.h"
+#import "ZYQAssetPickerController.h"
+#import <AssetsLibrary/AssetsLibrary.h>
+#import <AVFoundation/AVFoundation.h>
+#import <AVFoundation/AVCaptureDevice.h>
+
+//mainContentFrame
+#define mainContentFrame Rect(0,mainContentYOffset,mainContentWidth,mainContentHeight)
+
+//拖动手势 距离x方向上，左右，最大的起始偏移量和最终的位置的偏移量
+#define panGestureLeftMaxXOffset 180.f
+#define panGestureRightMaxXOffset 180.f
+#define panGestureLeftMaxStartXOffset 30.f
+#define panGestureRightMaxStartXOffset 30.f
+
+//弹框文本
+#define cancelBtnText @"知道了..."
+#define destructiveBtnTxt @"确定"
+
+//获取照片actionSheet的tag值
+#define avActionSheetTag 100000
+
+//导航栏的透明度
+#define navBarAlpha 0.8f
+
+//正常从图库中检索图片的imagePickView的tag
+#define imagePickViewTag_fromAlbum_normal 100001
+//从图库中获取待扫描的二维码的pickView的tag
+#define imagePickViewTag_fromAlbum_forQRCode 100002
+//正常相机拍照的imagePickView的tag
+#define imagePickViewTag_fromCamera_normal 100003
+//扫描二维码的pickView的tag
+#define imagePickViewTag_fromCamera_forQRCode 100004
+
+#pragma mark 从图片相册中获取图片的功能类型枚举
+typedef NS_ENUM(NSInteger, PickImageFromAlbumType)
+{
+    PickImageFromAlbumType_Normal  = 0,//正常获取图片
+    PickImageFromAlbumType_QRCode  = 1,//获取扫描的二维码照片
+};
+
+#pragma mark 相机拍照得到的图片类型枚举
+typedef NS_ENUM(NSInteger, PickImageFromCarmeraType)
+{
+    PickImageFromCarmeraType_Normal  = 0,//相机拍照后的图片正常使用
+    PickImageFromCarmeraType_QRCode  = 1,//相机拍照主要用户扫描二维码
+};
+
+@interface BaseController ()
+<HttpRequestClientDelegate,
+ UIGestureRecognizerDelegate,
+MBProgressHUDDelegate,
+UINavigationControllerDelegate,
+UIImagePickerControllerDelegate,
+PECropViewControllerDelegate,
+ZYQAssetPickerControllerDelegate,
+ZBarReaderDelegate,
+NavBarViewWidgetDelegate,
+QRcodeScanControllerDelegate,
+UIActionSheetDelegate>{
+    CGPoint _startMovePoint;//手指开始移动的位置
+    CGRect _orginFrame;//之前的view的frame
+    ZBarReaderViewController *_zBarReaderView;
+}
+@end
+
+/**
+ * uiviewController的基类
+ * @since:2014-12-16
+ * @author:liys
+ */
+@implementation BaseController
+@synthesize isloading;
+@synthesize showErrWithToast;
+@synthesize needLogin;
+@synthesize HUD = _HUD;
+@synthesize httpClient  = _httpClient;
+@synthesize reqParams = _reqParams;
+
+//~~~~~~~~~~~~~处理页面生命周期相关的方法~~~~~~~~~~~~~~~~~~//
+#pragma mark view已加载
+- (void)viewDidLoad {
+    
+    [super viewDidLoad];
+    
+    //是否正在加载的标识
+    isloading = NO;
+    
+    //默认是用alert方式提示错误
+    showErrWithToast = NO;
+    
+    //导航栏
+    if([self navBar])
+    {
+        [self.view addSubview:[self navBar]];
+    }
+    
+    //背景颜色设置
+    [self setControllerBgColor];
+    
+    //添加tap手势
+    if([self needAddTapGesture])
+    {
+        UITapGestureRecognizer *singleFingerTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTapGesture:)];
+        singleFingerTap.delegate = self;
+        [self.view addGestureRecognizer:singleFingerTap];
+    }
+    
+    //添加pan手势
+    if ([self needAddPanGesture])
+    {
+        UIPanGestureRecognizer *panRecognizer = [[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(handlePanGesture:)];
+        panRecognizer.delegate = self;
+        [self.view addGestureRecognizer:panRecognizer];
+    }
+
+    //添加swipe手势
+    if ([self needAddSwipeGesture])
+    {
+        UISwipeGestureRecognizer *recognizer = [[UISwipeGestureRecognizer alloc]initWithTarget:self action:@selector(handleSwipeGesture:)];
+        [recognizer setDirection:(UISwipeGestureRecognizerDirectionRight)];
+        [[self view] addGestureRecognizer:recognizer];
+    }
+}
+
+#pragma mark 设置控制器的背景颜色
+-(void)setControllerBgColor
+{
+    if(IOS7)
+    {
+        self.view.backgroundColor=[UIColor clearColor];
+        UIView *bGView = [[UIView alloc] initWithFrame:mainContentFrame];
+        bGView.backgroundColor = DEFAULT_BG_COLOR;
+        [self.view addSubview:bGView];
+    }else
+    {
+        self.view.backgroundColor=DEFAULT_BG_COLOR;
+    }
+}
+
+#pragma mark viewcontroller即将显示到前台
+-(void)viewWillAppear:(BOOL)animated
+{
+    //友盟统计
+    [MobClick beginLogPageView:NSStringFromClass([self class])];
+    //拦截登录
+    [self interceptLogin];
+    [super viewWillAppear:animated];
+}
+
+#pragma mark viewController即将退出前台显示
+-(void)viewWillDisappear:(BOOL)animated
+{
+    //友盟统计
+    [MobClick endLogPageView:NSStringFromClass([self class])];
+    [super viewWillDisappear:animated];
+}
+
+#pragma mark 拦截登录
+-(void)interceptLogin
+{
+    //先判断是否需要登录，如果需要登录，则做登录拦截
+    if (needLogin && [CommonUtils isStrEmpty:[CommonUtils userToken]])
+    {
+        [self redirectToLogin];
+    }
+}
+
+#pragma mark 跳转到登录页面
+-(void)redirectToLogin
+{
+    LoginController *loginController = [[LoginController alloc] init];
+    loginController.reqParams = [NSDictionary dictionaryWithObjectsAndKeys:NSStringFromClass([self class]), targetControllerKey,self.reqParams,targetControllerReqParamsKey,nil];
+    [self presentViewController:loginController animated:YES completion:^{
+    }];
+}
+
+#pragma mark 收到内存警告
+-(void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    _HUD = nil;
+    _httpClient = nil;
+    _reqParams = nil;
+    _qrScanController = nil;
+    _zBarReaderView = nil;
+    _zBarReader = nil;
+}
+
+//~~~~~~~~~~~~~处理页面手势相关的方法~~~~~~~~~~~~~~~~~~//
+#pragma mark 处理Swipe手势
+-(void)handleSwipeGesture:(UISwipeGestureRecognizer *)gesture
+{
+    if(gesture.direction==UISwipeGestureRecognizerDirectionRight)
+    {
+        [self gotoBack:nil];//从右向左滑动时，相当于返回操作
+    }
+}
+
+#pragma mark 处理Tap手势
+- (void)handleTapGesture:(UITapGestureRecognizer *)gesture
+{
+
+}
+
+#pragma mark 处理pan手势情况
+-(void)handlePanGesture:(UIPanGestureRecognizer*)gesture
+{
+    CGPoint touchPoint = [gesture locationInView:[SharedApplication keyWindow]];
+    if (gesture.state == UIGestureRecognizerStateBegan)
+    {
+        _startMovePoint = touchPoint;
+        _orginFrame = self.view.frame;
+    }else if(gesture.state == UIGestureRecognizerStateChanged)
+    {
+        if(_startMovePoint.x < panGestureLeftMaxStartXOffset)//从左边
+        {
+            [self moveViewWithX:touchPoint.x view:self.view];
+        }else if(_startMovePoint.x > SCREEN_WIDTH -panGestureRightMaxStartXOffset)//从右边
+        {
+            [self moveViewWithX:-(SCREEN_WIDTH-touchPoint.x) view:self.view];
+        }
+    }else if(gesture.state == UIGestureRecognizerStateEnded)
+    {
+        if(_startMovePoint.x < panGestureLeftMaxStartXOffset)//从左边
+        {
+            if (touchPoint.x > panGestureLeftMaxXOffset)
+            {
+                [self popViewControllerFromLeft];
+            }else
+            {
+                [self restoreToOrignalFrame:self.view];
+            }
+        }else if(_startMovePoint.x > SCREEN_WIDTH -panGestureRightMaxStartXOffset)//从右边
+        {
+            if ((SCREEN_WIDTH-touchPoint.x) > panGestureRightMaxXOffset)
+            {
+                [self popViewControllerFromRight];
+            }else{
+                [self restoreToOrignalFrame:self.view];
+            }
+        }
+    }
+}
+
+#pragma mark 恢复至之前的frame
+-(void)restoreToOrignalFrame:(UIView*)view
+{
+    [UIView animateWithDuration:0.5 animations:^{
+        view.frame = _orginFrame;
+    } completion:nil];
+    
+}
+
+#pragma mark 将view移动到x
+- (void)moveViewWithX:(float)x view:(UIView*)view
+{
+    __weak BaseController *baseController = self;
+    [UIView animateWithDuration:0.5 animations:^{
+        CGFloat viewX = x;
+        CGFloat viewY = view.frame.origin.y;
+        CGFloat viewW = view.frame.size.width;
+        CGFloat viewH = view.frame.size.height;
+        CGRect  viewFrame = (CGRect){viewX,viewY,viewW,viewH};
+        baseController.view.frame = viewFrame;
+    } completion:nil];
+}
+
+#pragma mark 是否需要添加TapGesture
+-(BOOL)needAddTapGesture
+{
+    return NO;
+}
+
+#pragma mark 是否需要添加PanGesture
+-(BOOL)needAddPanGesture
+{
+    return NO;
+}
+
+#pragma mark 是否需要添加SwipeGesture
+-(BOOL)needAddSwipeGesture
+{
+    return NO;
+}
+
+//~~~~~~~~~~~~~处理页面数据重新加载相关的方法~~~~~~~~~~~~~~~~~~//
+#pragma mark 重新加载页面 子类覆盖
+- (void)reloadController:(UIViewController *)controller
+{
+    
+}
+
+//~~~~~~~~~~~~~处理页面回退相关的方法~~~~~~~~~~~~~~~~~~//
+#pragma mark 回退
+-(void)gotoBack:(UIButton *)sender
+{
+    [self popViewControllerFromLeft];
+}
+
+//~~~~~~~~~~~~~处理页面键盘相关的方法~~~~~~~~~~~~~~~~~~//
+#pragma mark 键盘遮挡UItextField的调用方式
+- (void)moveView:(UITextField *)textField leaveView:(BOOL)leave
+{
+    UIView *accessoryView = textField.inputAccessoryView;
+    UIView *inputview     = textField.inputView;
+    int textFieldY = 0;
+    int accessoryY = 0;
+    if (accessoryView && inputview)
+    {
+        CGRect accessoryRect = accessoryView.frame;
+        CGRect inputViewRect = inputview.frame;
+        accessoryY = ScreenHeight - (accessoryRect.size.height + inputViewRect.size.height);
+    }
+    else if (accessoryView)
+    {
+        CGRect accessoryRect = accessoryView.frame;
+        accessoryY = ScreenHeight -(accessoryRect.size.height + 216);
+    }
+    else if (inputview)
+    {
+        CGRect inputViewRect = inputview.frame;
+        accessoryY = ScreenHeight - inputViewRect.size.height;
+    }
+    else
+    {
+        accessoryY = ScreenHeight - 236;
+    }
+    CGRect textFieldRect = [textField convertRect:textField.frame toView:self.view.window];
+    textFieldY = textFieldRect.origin.y + textFieldRect.size.height + SCREEN_HEIGHT_START;
+    int offsetY = textFieldY - accessoryY;
+    if (!leave && offsetY > 0)
+    {
+        int y_offset = -5;
+        y_offset += -offsetY;
+        CGRect viewFrame = self.view.frame;
+        viewFrame.origin.y += y_offset;
+        [UIView beginAnimations:nil context:NULL];
+        [UIView setAnimationBeginsFromCurrentState:YES];
+        [UIView setAnimationDuration:0.1];
+        [self.view setFrame:viewFrame];
+        [UIView commitAnimations];
+    }
+    else
+    {
+        CGRect viewFrame = CGRectMake(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        [UIView beginAnimations:nil context:NULL];
+        [UIView setAnimationBeginsFromCurrentState:YES];
+        [UIView setAnimationDuration:0.3];
+        [self.view setFrame:viewFrame];
+        [UIView commitAnimations];
+    }
+}
+
+
+//~~~~~~~~~~~~~处理页面导航栏相关的方法~~~~~~~~~~~~~~~~~~//
+#pragma mark 获取导航栏
+-(BaseNaviBarWidget*)navBar
+{
+    //导航栏对象
+    NavBarViewWidget *navBar = [[NavBarViewWidget alloc]init];
+    //导航栏信息
+    NavBarInfoModel *navBarInfo = [self navBarInfo];
+    //背景色
+    navBar.bgcolor = RGB_TextColor_C0;
+    navBar.backgroundColor = RGB_TextColor_C0;
+    //左边
+    NSString *navBarLeftIcon = navBarInfo.navLeftIcon;
+    if ([CommonUtils isStrEmpty:navBarLeftIcon])
+    {
+        navBarLeftIcon = @"back.png";
+    }
+    navBar.leftIcon = [UIImage imageNamed:navBarLeftIcon];
+    navBar.leftTitleColor = RGB_TextColor_C10;
+    navBar.leftTitleFont = FONT_TextSize_S3_Bold;
+    navBar.leftTitle = navBarInfo.navLeftTitle;
+    //中间
+    navBar.centerTitleColor = RGB_TextColor_C10;
+    navBar.centerTitleFont = FONT_TextSize_S4_Bold;
+    navBar.centerTitle = navBarInfo.navCenterTitle;
+    navBar.centerIcon = [UIImage imageNamed:navBarInfo.navCenterIcon];
+    //右边
+    navBar.rightTitleColor = RGB_TextColor_C10;
+    navBar.rightTitleFont = FONT_TextSize_S3_Bold;
+    navBar.rightTitle = navBarInfo.navRightTitle;
+    navBar.rightIcon = [UIImage imageNamed:navBarInfo.navRightIcon];
+    //设置代理
+    navBar.delegate = self;
+    //返回
+    return navBar;
+}
+
+#pragma mark 获取导航栏信息
+-(NavBarInfoModel*)navBarInfo
+{
+    return nil;
+}
+
+#pragma mark NavBarViewWidgetDelegate代理方法
+-(void)leftNavBarBtnClicked:(UIButton *)leftNavBarBtn
+{
+    [self gotoBack:nil];
+    
+}
+-(void)centerNavBarBtnClicked:(UIButton *)centerNavBarBtn
+{
+    
+}
+-(void)rightNavBarBtnClicked:(UIButton *)rightNavBarBtn
+{
+    
+}
+
+
+//~~~~~~~~~~~~~处理所有与http请求相关的业务方法~~~~~~~~~~~~~~~~~~~~//
+#pragma mark 获取httpClient
+-(HttpRequestClient *)httpClient
+{
+    if (!_httpClient)
+    {
+        _httpClient = [[HttpRequestClient alloc]init];
+        _httpClient.delegate = self;
+    }
+    return _httpClient;
+}
+
+#pragma 发送post请求
+-(void)doPost:(NSString *)url params:(NSDictionary *)params{
+    [self doPost:url params:params tag:0 showProgress:YES];
+}
+
+#pragma mark 发送post请求
+-(void)doPost:(NSString *)url params:(NSDictionary *)params tag:(int)reqTag{
+    [self doPost:url params:params tag:reqTag showProgress:YES];
+}
+
+#pragma mark 发送post请求
+-(void)doPost:(NSString *)url params:(NSDictionary *)params tag:(int)reqTag showProgress:(BOOL)showProgress{
+    if (showProgress)
+    {
+        isloading=YES;
+        [self beginLoading:nil view:self.view];
+    }
+    [self.httpClient doPostWithUrl:url params:params dataType:json_data_type reqTag:reqTag];
+}
+
+#pragma mark 上传图片
+- (void) uploadImage:(NSString *) url image:(UIImage *)image params:(NSDictionary *) params tag:(int)reqTag
+{
+    [self.httpClient uploadImgWithUrl:url
+                                image:image
+                               params:params
+                             dataType:json_data_type
+                                  tag:reqTag];
+}
+
+#pragma mark 请求成功或失败后回调
+-(void)respResult:(NSDictionary*)result errorcode:(int)errorcode
+         errorMsg:(NSString*)errorMsg
+         dataType:(HttpRequestDataType)dataType
+              tag:(int)reqTag{
+    if (isloading)
+    {
+        isloading = NO;
+        [self stopLoading];
+    }
+    //响应失败
+    if (errorcode != HttpRespCode_RespSuceess)
+    {
+        //需要登录
+        if (errorcode == HttpRespCode_NOLogin)
+        {
+            [self redirectToLogin];
+            return;
+        }
+        else
+        {
+            [self handleErrorCode:errorcode errormsg:errorMsg tag:reqTag];
+        }
+    }
+    else
+    {
+        [self handleRespResult:result tag:reqTag];//响应成功
+    }
+}
+
+#pragma mark 响应成功后回调
+-(void)handleRespResult:(NSDictionary*)result tag:(int)reqTag
+{
+    
+}
+
+#pragma mark 响应失败后回调
+-(void)handleErrorCode:(int)errorCode errormsg:(NSString *)message tag:(int)reqTag
+{
+    //是否显示错误信息
+    BOOL alertError = [self handleErrorCode:errorCode info:message tag:reqTag];
+    if (alertError)
+    {
+        //如果错误信息为空，直接给一个默认的
+        if([CommonUtils isStrEmpty:message])
+        {
+            message = DEFAULT_REQUEST_ERROR_MESSAGE;
+        }
+        //提示错误信息
+        if(showErrWithToast)
+        {
+            [self showAlert:nil message:message type:AlertViewType_Toast];
+        }
+        else
+        {
+            [self showAlert:nil message:message type:AlertViewType_Alert];
+        }
+    }
+    //处理请求错误的回调
+    [self reqErrorHandle:errorCode errormsg:message tag:reqTag];
+}
+
+#pragma mark 处理请求错误的回调
+-(void)reqErrorHandle:(int)errorCode errormsg:(NSString *)message tag:(int)reqTag
+{
+    
+}
+
+#pragma mark 错误码处理，返回yes代表需要弹出提示
+-(BOOL)handleErrorCode:(int) code info:(NSString *)info tag:(int)reqTag
+{
+    return YES;
+}
+
+#pragma mark 图片或者文件上传回调
+-(void)uploadProgressWithFinishedBytes:(long long)finishedBytes totalBytes:(long long)totalBytes
+{
+    
+}
+
+//~~~~~~~~~~~加载视图~~~~~~~~~~~~~//
+#pragma mark 开始加载
+-(void)beginLoading:(NSString*)title view:(UIView*)view{
+    [self stopLoading];
+    _HUD = [MBProgressHUD showHUDAddedTo:view animated:YES];
+    _HUD.mode = MBProgressHUDModeIndeterminate;
+    _HUD.labelText = [CommonUtils isStrEmpty:title] ? @"正在加载..." : title;
+    _HUD.margin = 10.f;
+    _HUD.removeFromSuperViewOnHide = YES;
+}
+
+#pragma mark 结束加载
+-(void)stopLoading
+{
+    if(_HUD)
+    {
+        [_HUD hide:YES];
+        [_HUD  removeFromSuperview];
+        _HUD = nil;
+    }
+}
+
+//~~~~~~~~~~~~~~~处理页面出现效果的方法~~~~~~~~~~~~~~~~~//
+#pragma mark - 自上而下推进视图控制器的动画效果
+- (void)pushViewControllerFromTop:(UIViewController *)viewController
+{
+    CATransition* animation = [self pushTopMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:nil];
+    [self.navigationController pushViewController:viewController animated:NO];
+}
+
+#pragma mark - 自上而下推出视图控制器的动画效果
+- (void)popViewControllerFromTop
+{
+    self.view.alpha = 0;
+    CATransition* animation = [self popTopMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:nil];
+    [self.navigationController popViewControllerAnimated:NO];
+}
+
+#pragma mark - 自下而上推进视图控制器的动画效果
+- (void)pushViewControllerFromBottom:(UIViewController *)viewController
+{
+    CATransition* animation = [self pushBottomMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:nil];
+    [self.navigationController pushViewController:viewController animated:NO];
+}
+
+#pragma mark - 自下而上推出视图控制器的动画效果
+- (void)popViewControllerFromBottom
+{
+    self.view.alpha = 0;
+    CATransition* animation = [self popBottomMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:nil];
+    [self.navigationController popViewControllerAnimated:NO];
+}
+
+#pragma mark 自左而右的推进视图控制器
+-(void)pushViewControllerFromLeft:(UIViewController*)viewController
+{
+    CATransition* animation = [self pushLeftMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:@"left-push"];
+    [self.navigationController pushViewController:viewController animated:NO];
+}
+
+#pragma mark 自左而右的推出视图控制器
+-(void)popViewControllerFromLeft
+{
+    self.view.alpha = 0;
+    CATransition* animation = [self popLeftMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:@"left-pop"];
+    [self.navigationController popViewControllerAnimated:NO];
+}
+
+#pragma mark 自右而左的推进视图控制器
+-(void)pushViewControllerFromRight:(UIViewController*)viewController
+{
+    CATransition* animation = [self pushRightMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:@"right-push"];
+    [self.navigationController pushViewController:viewController animated:NO];
+}
+
+#pragma mark 自左而右的推出视图控制器
+-(void)popViewControllerFromRight
+{
+    self.view.alpha = 0;
+    CATransition* animation = [self popRightMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:@"right-pop"];
+    [self.navigationController popViewControllerAnimated:NO];
+}
+
+#pragma mark 跳转到根控制器
+-(void)popToRootViewController
+{
+    self.view.alpha = 0;
+    CATransition* animation = [self popLeftMoveAnimation];
+    [self.navigationController.view.layer addAnimation:animation forKey:@"right-pop-rootview"];
+    [self.navigationController popToRootViewControllerAnimated:NO];
+}
+
+#pragma mark 显示消息框--不带标题
+-(void)showAlert:(NSString*)message type:(AlertViewType)type
+{
+    [ApplicationDelegate showAlert:message type:type];
+}
+
+#pragma mark 弹框显示－－带标题
+-(void)showAlert:(NSString*)title message:(NSString*)message type:(AlertViewType)type
+{
+    [ApplicationDelegate showAlert:title message:message type:type];
+}
+
+#pragma mark 弹框显示－－带标题
+-(void)showAlertWithTowBtns:(NSString*)title message:(NSString*)message doneBtnFinishBlock:(void(^)(void))doneBtnFinishBlock
+{
+    [ApplicationDelegate showAlertWithTowBtns:title message:message doneBtnFinishBlock:doneBtnFinishBlock];
+}
+
+//~~~~~~~~~~~~~从图库中获取照片或者是拍摄相关的处理方法~~~~~~~~~~~~~~~~//
+#pragma mark 是否有拍照的权限
+-(BOOL)hasAvAuthority
+{
+    if (IOS7)
+    {
+        AVAuthorizationStatus authStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+        if (authStatus != AVAuthorizationStatusAuthorized && authStatus != AVAuthorizationStatusNotDetermined)
+        {
+            [self showAlert:nil message:@"相机权限目前为关闭，请前往“设置”打开。" type:AlertViewType_Alert];
+            return NO;
+        }
+    }
+    return YES;
+}
+
+#pragma mark 从相机或者相册中获取图片
+-(void)pickImages:(NSString*)title
+{
+    UIActionSheet *actionSheet = [[UIActionSheet alloc] initWithTitle:title
+                                                             delegate:self
+                                                    cancelButtonTitle:@"取消"
+                                               destructiveButtonTitle:nil
+                                                    otherButtonTitles:@"拍照",@"相册", nil];
+    actionSheet.tag = avActionSheetTag;
+    [actionSheet showInView:[ApplicationDelegate window]];
+}
+
+#pragma mark 处理从相机或者相册中获取到的图片--(子类覆盖)
+-(void)handlePickImages:(NSArray*)images
+{
+    
+}
+
+#pragma mark UIActionSheetDelegate method
+- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    if (actionSheet.tag == avActionSheetTag)
+    {
+        [self handleActionSheetPickImages:buttonIndex];
+    }
+    
+}
+
+#pragma mark 处理获取图片的方法
+-(void)handleActionSheetPickImages:(NSInteger)buttonIndex
+{
+    switch (buttonIndex)
+    {
+        case 0:
+            [self takePicFromCamera:PickImageFromCarmeraType_Normal];
+           break;
+        case 1:
+            [self takePicFromAlbum:PickImageFromAlbumType_Normal];
+           break;
+        default:
+           break;
+    }
+}
+
+#pragma mark 从相册中选择图片
+-(void)takePicFromAlbum:(PickImageFromAlbumType)type
+{
+    if ([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) {
+        ZYQAssetPickerController *picker = [[ZYQAssetPickerController alloc] init];
+        if (type == PickImageFromAlbumType_QRCode)
+        {
+            picker.view.tag = imagePickViewTag_fromAlbum_forQRCode;//二维码扫描
+        }
+        else
+        {
+            picker.view.tag = imagePickViewTag_fromAlbum_normal;//正常从相册中选择图片
+        }
+        picker.maximumNumberOfSelection = 1;
+        picker.assetsFilter = [ALAssetsFilter allPhotos];
+        picker.showEmptyGroups=NO;
+        picker.delegate = self;
+        picker.selectionFilter = [NSPredicate predicateWithBlock:^BOOL(id evaluatedObject, NSDictionary *bindings)
+                                  {
+                                      if ([[(ALAsset*)evaluatedObject valueForProperty:ALAssetPropertyType] isEqual:ALAssetTypeVideo])
+                                      {
+                                          NSTimeInterval duration = [[(ALAsset*)evaluatedObject valueForProperty:ALAssetPropertyDuration] doubleValue];
+                                          return duration >= 5;
+                                      } else
+                                      {
+                                          return YES;
+                                      }
+                                  }];
+        [self presentViewController:picker animated:YES completion:NULL];
+    }else
+    {
+        [self showAlert:nil message:@"对不起，您的手机暂不支持从图库中获取照片" type:AlertViewType_Alert];
+    }
+   
+    
+}
+
+#pragma mark 从相机中获取图片
+-(void)takePicFromCamera:(PickImageFromCarmeraType)type
+{
+    if([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera] && [self hasAvAuthority])
+    {
+        UIImagePickerController *pickView = [[UIImagePickerController alloc] init];
+        pickView.delegate = self;
+        [pickView setSourceType:UIImagePickerControllerSourceTypeCamera];
+        if (type == PickImageFromCarmeraType_QRCode)
+        {
+            pickView.view.tag = imagePickViewTag_fromCamera_forQRCode;//二维码扫描
+        }
+        else
+        {
+            pickView.view.tag = imagePickViewTag_fromCamera_normal;//正常拍照
+        }
+        [self presentViewController:pickView animated:YES completion:nil];
+    }else
+    {
+        [self showAlert:nil message:@"对不起，您的设备暂不支持拍照" type:AlertViewType_Toast];
+    }
+}
+
+#pragma mark UIImagePickerControllerDelegate代理方法－－拍照
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
+{
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    UIImage* original = [info objectForKey:UIImagePickerControllerOriginalImage];
+    if (imagePickViewTag_fromCamera_normal == picker.view.tag)
+    {
+        PECropViewController *controller = [[PECropViewController alloc] init];
+        controller.delegate = self;
+        controller.image = original;
+        UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:controller];
+        [self presentViewController:navigationController animated:YES completion:NULL];
+    }
+    else
+    {
+        id<NSFastEnumeration> scanResults = [info objectForKey: ZBarReaderControllerResults];
+        [self processQRCodeScanResult:scanResults];
+    }
+    
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+{
+    [picker dismissViewControllerAnimated:YES completion:nil];
+}
+
+
+#pragma mark 处理二维码扫描的结果
+-(void)handleQRCodeScan:(UIImage*)image
+{
+    id<NSFastEnumeration> results = [self.zBarReader scanImage:image.CGImage];
+    [self processQRCodeScanResult:results];
+}
+
+#pragma mark 处理二维码扫描的结果
+-(void)processQRCodeScanResult:(id)scanResults
+{
+    [self beginLoading:@"正在处理" view:self.qrScanController.view];
+    int quality = 0;
+    ZBarSymbol *bestResult = nil;
+    for(ZBarSymbol *sym in scanResults)
+    {
+        int q = sym.quality;
+        if(quality < q)
+        {
+            quality = q;
+            bestResult = sym;
+        }
+    }
+    if (!scanResults)
+    {
+        [self.qrScanController showAlert:nil message:@"亲，二维码扫描出错啦!" type:AlertViewType_Alert];
+    }
+    else
+    {
+        NSString *scanRsStr = bestResult.data;
+        if ([bestResult.data canBeConvertedToEncoding:NSShiftJISStringEncoding])
+        {
+            scanRsStr = [NSString stringWithCString:[scanRsStr cStringUsingEncoding:NSShiftJISStringEncoding]
+                                           encoding:NSUTF8StringEncoding];
+        }
+        [_zBarReaderView.navigationController popViewControllerAnimated:YES];
+        [self QRCodeScanResult:scanRsStr];
+    }
+    [self stopLoading];
+}
+
+#pragma mark 二维码扫描结果
+-(void)QRCodeScanResult:(NSString*)scanRsStr
+{
+    
+}
+
+#pragma mark ZYQAssetPickerControllerDelegate代理方法
+-(void)assetPickerController:(ZYQAssetPickerController *)picker didFinishPickingAssets:(NSArray *)assets
+{
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    if (PickImageFromAlbumType_Normal == picker.view.tag)
+    {
+        if (!assets || assets.count == 0)
+        {
+           [self showAlert:nil message:@"亲，请选择图片哦" type:AlertViewType_Alert];
+        }
+        else if (assets && assets.count == 1)
+        {
+            ALAsset *asset=assets[0];
+            PECropViewController *controller = [[PECropViewController alloc] init];
+            controller.delegate = self;
+            controller.image = [UIImage imageWithCGImage:asset.defaultRepresentation.fullScreenImage];
+            UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:controller];
+            [self presentViewController:navigationController animated:YES completion:nil];
+        }
+        else
+        {
+            NSMutableArray *images = [NSMutableArray array];
+            for (ALAsset *asset in assets) {
+                UIImage *itemImage = [UIImage imageWithCGImage:asset.defaultRepresentation.fullScreenImage];
+                [images addObject:itemImage];
+            }
+            [self handlePickImages:images];
+        }
+    }
+    else
+    {
+        if (assets && assets.count > 0)
+        {
+            ALAsset *asset=assets[0];
+            [self handleQRCodeScan:[UIImage imageWithCGImage:asset.defaultRepresentation.fullScreenImage]];//扫描二维码图片
+        }
+        else
+        {
+            [self showAlert:nil message:@"亲，请选择待扫描的二维码图片哦" type:AlertViewType_Alert];
+        }
+    }
+}
+
+-(void)assetPickerControllerDidCancel:(ZYQAssetPickerController *)picker
+{
+    [picker dismissViewControllerAnimated:YES completion:NO];
+}
+
+
+#pragma mark PECropViewControllerDelegate代理方法
+- (void)cropViewController:(PECropViewController *)controller didFinishCroppingImage:(UIImage *)croppedImage
+{
+    [controller dismissViewControllerAnimated:YES completion:nil];
+    //处理图片
+    [self handlePickImages:[NSMutableArray arrayWithObjects:croppedImage, nil]];
+}
+
+- (void)cropViewControllerDidCancel:(PECropViewController *)controller
+{
+    [controller dismissViewControllerAnimated:YES completion:nil];
+}
+
+//~~~~~~~~~~~~~~~~~~~二维码扫描相关的处理方法~~~~~~~~~~~~~~~~~~~~~~~~~~//
+#pragma mark 扫描二维码
+-(void)QRScan
+{
+    //生成扫描二维码的控制器对象
+    _zBarReaderView = [[ZBarReaderViewController alloc]init];
+    //设置代理
+    _zBarReaderView.readerDelegate = self;
+    //
+    _zBarReaderView.showsHelpOnFail = NO;
+    //非全屏
+    _zBarReaderView.wantsFullScreenLayout= NO;
+    //enableCache
+    _zBarReaderView.enableCache = NO;
+    //隐藏底部控制按钮
+    _zBarReaderView.showsZBarControls = NO;
+    //设置自己定义的界面
+    [self setOverlayPickerView:_zBarReaderView];
+    //cameraFlashMode
+    _zBarReaderView.cameraFlashMode = UIImagePickerControllerCameraFlashModeOff;
+    //扫描对象
+    ZBarImageScanner *scanner = _zBarReaderView.scanner;
+    //symbology
+    [scanner setSymbology: ZBAR_I25 config: ZBAR_CFG_ENABLE to: 0];
+    //跳转到扫描二维码的页面
+    [self pushViewControllerFromLeft:_zBarReaderView];
+}
+
+#pragma mark 设置自己定义二维码扫描的界面
+- (void)setOverlayPickerView:(ZBarReaderViewController *)reader
+{
+    //清除原有控件
+    for (UIView *temp in [reader.view subviews])
+    {
+        for (id item in [temp subviews])
+        {
+            if ([item isKindOfClass:[UIButton class]] || [item isKindOfClass:[UIToolbar class]])
+            {
+                [item removeFromSuperview];
+            }
+        }
+    }
+    [reader addChildViewController:self.qrScanController];
+    [reader.view addSubview:self.qrScanController.view];
+}
+
+#pragma mark 二维码扫描界面
+-(QRcodeScanController*)qrScanController
+{
+    if (!_qrScanController)
+    {
+        _qrScanController = [[QRcodeScanController alloc]init];
+        _qrScanController.delegate = self;
+    }
+    return _qrScanController;
+}
+
+
+#pragma mark  zBarReader对象
+-(ZBarReaderController*)zBarReader{
+    if (!_zBarReader)
+    {
+        _zBarReader = [ZBarReaderController new];
+        _zBarReader.allowsEditing = NO   ;
+        _zBarReader.showsHelpOnFail = NO;
+        _zBarReader.readerDelegate = self;
+        _zBarReader.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+    }
+    return _zBarReader;
+}
+
+#pragma mark ZBarReaderDelegate代理方法
+- (void) readerControllerDidFailToRead: (ZBarReaderController*) reader
+                             withRetry: (BOOL) retry
+{
+    if(retry)
+    {
+        //retry == 1 选择图片为非二维码。
+        [self.qrScanController showAlert:nil message:@"亲，选择图片为非二维码" type:AlertViewType_Alert];
+        return;
+    }
+}
+
+#pragma mark QRcodeScanController代理方法
+-(void)pickQRCodeImageFromAlbum
+{
+    [self takePicFromAlbum:PickImageFromAlbumType_QRCode];
+}
+
+-(void)leftBtnClicked:(UIButton *)btn qrViewController:(QRcodeScanController *)qrViewController
+{
+    [_zBarReaderView.navigationController popViewControllerAnimated:YES];
+}
+
+#pragma mark 定位功能开启状态
+- (BOOL)locationServicesIsOpen
+{
+    if (([CLLocationManager authorizationStatus] == kCLAuthorizationStatusDenied) || (![CLLocationManager locationServicesEnabled]))
+    {
+        [self showAlert:@"提醒" message:@"微水洗车的定位服务已关闭,请进入系统设置开启" type:AlertViewType_Alert];
+        return NO;
+    }
+    else
+    {
+        return YES;
+    }
+}
+@end

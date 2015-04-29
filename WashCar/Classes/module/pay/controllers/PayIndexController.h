@@ -1,0 +1,14 @@
+//
+//  PayIndexController.h
+//  Washcar
+//
+//  Created by yanshengli on 14-12-25.
+//  description:支付首页
+//
+
+#import "BaseController.h"
+
+@class PayIndexModel;
+
+@interface PayIndexController : BaseController
+@end

@@ -1,0 +1,40 @@
+//
+//  PaywayActionSheet.h
+//  WashCar
+//
+//  Created by yangyixian on 15/1/24.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//
+
+#import <UIKit/UIKit.h>
+#pragma mark 支付方式选中后回调
+typedef void (^PaywaySelectedBlock)(NSString *payway,BOOL isSelected);
+
+@protocol PaywayActionSheetDelegate <NSObject>
+@optional
+-(void)choseAtIndex:(int)index;
+@end
+
+
+@interface PaywayActionSheet : UIView
+{
+    UIButton * cancelButton;
+    UIView * coverView;
+}
+@property(nonatomic,strong)NSArray * buttons;
+@property(nonatomic,strong)UIImageView * backgroundImageView;
+@property(nonatomic,assign)id<PaywayActionSheetDelegate> delegate;
+@property (nonatomic,strong)PaywaySelectedBlock selectedCallBack;
+- (id)initWithButtons:(NSArray *)buttons;
+-(void)showInView:(UIView *)view;
+-(void)dissmiss;
+@end
+
+
+@interface PaywayActionSheetButton : UIView
+@property(nonatomic,strong)UIButton * imgButton;
+@property(nonatomic,strong)UILabel * titleLabel;
++(PaywayActionSheetButton *)buttonWithImage:(NSString *)image title:(NSString *)title;
++(PaywayActionSheetButton *)buttonWithImage:(NSString *)image selectedImage:(NSString *)selectedimage title:(NSString *)title;
+
+@end

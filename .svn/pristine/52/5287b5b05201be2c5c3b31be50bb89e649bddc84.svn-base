@@ -1,0 +1,356 @@
+//
+//  QRcodeScanController.m
+//  WashCar
+//
+//  Created by yanshengli on 14-12-29.
+//  Copyright (c) 2014年 cheletong. All rights reserved.
+//
+
+#import "QRcodeScanController.h"
+#import "TapImageViewWidget.h"
+#import "MobClick.h"
+#import "UIView+Toast.h"
+#import "ZYQAssetPickerController.h"
+#import "NavBarViewWidget.h"
+#import "UIViewController+animation.h"
+#import <AssetsLibrary/AssetsLibrary.h>
+#import <AVFoundation/AVFoundation.h>
+#import <AVFoundation/AVCaptureDevice.h>
+
+
+//底部按钮的高度
+#define btnHeight 60.f
+//底部按钮的宽度
+#define btnWidth 60.f
+//底部按钮在垂直方向上的间隙
+#define btnVerticalPadding 16.f
+//扫描视图距离x左边的偏移量
+#define scanViewX 55.f
+//扫描视图的高度
+#define scanViewH 200.f
+//中间扫描区的视图透明度
+#define scanAreaViewAlpha 0.5f
+//扫描线的高度
+#define scanLineHeight 18.f
+//底部视图的透明度
+#define bottomViewAlpha 0.8f
+//导航栏的透明度
+#define navBarAlpha 0.8f
+//弹框文本
+#define cancelBtnText @"知道了..."
+#define destructiveBtnTxt @"确定"
+
+/***
+ *
+ *@description:二维码扫描使用的控制器--接口
+ *@since:2014-12-29
+ *@author:liys
+ *@corp:cheletong
+ */
+@interface QRcodeScanController()
+<NavBarViewWidgetDelegate>
+{
+    //是否是开灯状态
+    BOOL isOn;
+    //扫描是否到底部了
+    BOOL isBottom;
+    //中间的扫描区
+    UIView *_scanCenterView;
+    UIView *_scanAreaView;
+    UIView *_scanLeftView;
+    UIView *_scanRightView;
+    UIView *_scanTopView;
+    UIView *_scanBottomView;
+    TapImageViewWidget *_lineImage;
+    //底部的按钮区
+    UIView *_bottomView;
+    UIButton *_photoBtn;
+    UIButton *_lightBtn;
+    //定时器
+    NSTimer *_scanTimer;
+}
+
+@end
+
+@implementation QRcodeScanController
+
+#pragma mark 代理
+@synthesize delegate;
+
+#pragma mark 生命周期方法--viewDidLoad
+-(void)viewDidLoad
+{
+    [super viewDidLoad];
+    
+    //1.初始化视图
+    [self initView];
+}
+
+#pragma mark 生命周期方法--viewDidAppear
+-(void)viewDidAppear:(BOOL)animated
+{
+    //友盟统计
+    [MobClick beginLogPageView:NSStringFromClass([self class])];
+    [self createTimer];
+}
+
+#pragma mark 生命周期方法--viewDidDisappear
+-(void)viewDidDisappear:(BOOL)animated
+{
+    //友盟统计
+    [MobClick endLogPageView:NSStringFromClass([self class])];
+    //关闭定时器
+    [self stopTimer];
+    
+}
+
+#pragma 设置背景颜色
+-(void)setControllerBgColor
+{
+    self.view.backgroundColor = [UIColor clearColor];
+}
+
+#pragma mark 初始化视图
+-(void)initView
+{
+    //设置视图的背景颜色
+    [self setControllerBgColor];
+    
+    //导航栏
+    [self.view addSubview:[self navBar]];
+    
+    //中间的扫描区域
+    CGFloat scanAreaX = 0.f;
+    CGFloat scanAreaW = SCREEN_WIDTH;
+    CGFloat scanAreaY = CGRectGetMaxY([self navBar].frame);
+    CGFloat scanAreaH = SCREEN_HEIGHT - scanAreaY - (btnHeight + 2 *btnVerticalPadding);
+    CGRect  scanAreaFrame = (CGRect){scanAreaX,scanAreaY,scanAreaW,scanAreaH};
+    _scanAreaView = [[UIView alloc]initWithFrame:scanAreaFrame];
+    _scanAreaView.backgroundColor = [UIColor clearColor];
+    [self.view addSubview:_scanAreaView];
+    
+    //扫描框视图
+    CGFloat scanX = scanViewX;
+    CGFloat scanH = scanViewH;
+    CGFloat scanY = (CGRectGetHeight(_scanAreaView.frame) - scanH)/2;
+    CGFloat scanW = CGRectGetWidth(_scanAreaView.frame) - scanX *2;
+    CGRect  scanFrame = (CGRect){scanX,scanY,scanW,scanH};
+    _scanCenterView = [[UIView alloc]initWithFrame:scanFrame];
+    _scanCenterView.layer.borderColor = [UIColor greenColor].CGColor;
+    _scanCenterView.layer.borderWidth = 1;
+    _scanCenterView.clipsToBounds = YES;
+    _scanCenterView.backgroundColor = [UIColor clearColor];
+    [_scanAreaView addSubview:_scanCenterView];
+    
+    //扫描线
+    CGFloat lineX = 0.f;
+    CGFloat lineY = 0.f;
+    CGFloat lineW = CGRectGetWidth(_scanCenterView.frame);
+    CGFloat lineH = scanLineHeight;
+    CGRect  lineRect = (CGRect){lineX,lineY,lineW,lineH};
+    _lineImage = [[TapImageViewWidget alloc]initWithFrame:lineRect];
+    _lineImage.image = [UIImage imageNamed:@"zx_code_line.png"];
+    [_scanCenterView addSubview:_lineImage];
+    
+    //扫描区上边视图
+    CGFloat scanTopX = 0.f;
+    CGFloat scanTopY = 0.f;
+    CGFloat scanTopW = CGRectGetWidth(_scanAreaView.frame);
+    CGFloat scanTopH = CGRectGetMinY(_scanCenterView.frame);
+    CGRect scanTopFrame = (CGRect){scanTopX,scanTopY,scanTopW,scanTopH};
+    _scanTopView = [[UIView alloc]initWithFrame:scanTopFrame];
+    _scanTopView.backgroundColor = [UIColor blackColor];
+    _scanTopView.alpha = scanAreaViewAlpha;
+    [_scanAreaView addSubview:_scanTopView];
+    
+    //扫描区下边视图
+    CGFloat scanBottomX = 0.f;
+    CGFloat scanBottomY = CGRectGetMaxY(_scanCenterView.frame);
+    CGFloat scanBottomW = CGRectGetWidth(_scanAreaView.frame);
+    CGFloat scanBottomH = CGRectGetMinY(_scanCenterView.frame);
+    CGRect  scanBottomFrame = (CGRect){scanBottomX,scanBottomY,scanBottomW,scanBottomH};
+    _scanBottomView = [[UIView alloc]initWithFrame:scanBottomFrame];
+    _scanBottomView.backgroundColor = [UIColor blackColor];
+    _scanBottomView.alpha = scanAreaViewAlpha;
+    [_scanAreaView addSubview:_scanBottomView];
+    
+    //扫描区左边的视图
+    CGFloat scanLeftX = 0.f;
+    CGFloat scanLeftY = CGRectGetMaxY(_scanTopView.frame);
+    CGFloat scanLeftpW = scanViewX;
+    CGFloat scanLeftH = CGRectGetHeight(_scanCenterView.frame);
+    CGRect  scanLeftFrame = (CGRect){scanLeftX,scanLeftY,scanLeftpW,scanLeftH};
+    _scanLeftView = [[UIView alloc]initWithFrame:scanLeftFrame];
+    _scanLeftView.backgroundColor = [UIColor blackColor];
+    _scanLeftView.alpha = scanAreaViewAlpha;
+    [_scanAreaView addSubview:_scanLeftView];
+    
+    //扫描区右边边的视图
+    CGFloat scanRightX = CGRectGetMaxX(_scanCenterView.frame);
+    CGFloat scanRightY = CGRectGetMaxY(_scanTopView.frame);
+    CGFloat scanRightW = scanViewX;
+    CGFloat scanRightH = CGRectGetHeight(_scanCenterView.frame);
+    CGRect  scanRightFrame = (CGRect){scanRightX,scanRightY,scanRightW,scanRightH};
+    _scanRightView = [[UIView alloc]initWithFrame:scanRightFrame];
+    _scanRightView.backgroundColor = [UIColor blackColor];
+    _scanRightView.alpha = scanAreaViewAlpha;
+    [_scanAreaView addSubview:_scanRightView];
+    
+    //底部视图
+    CGFloat bottomX = 0.f;
+    CGFloat bottomH = btnHeight + 2 * btnVerticalPadding;
+    CGFloat bottomW = SCREEN_WIDTH;
+    CGFloat bottomY = SCREEN_HEIGHT - bottomH;
+    CGRect  bottomFrame = (CGRect){bottomX,bottomY,bottomW,bottomH};
+    _bottomView = [[UIView alloc]initWithFrame:bottomFrame];
+    _bottomView.backgroundColor = [UIColor blackColor];
+    _bottomView.alpha = bottomViewAlpha;
+    [self.view addSubview:_bottomView];
+    
+    //开灯按钮
+    _lightBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    CGFloat lightX = scanViewX;
+    CGFloat lightY = btnVerticalPadding;
+    CGFloat lightW = btnWidth;
+    CGFloat lightH = btnHeight;
+    CGRect  lightRect = (CGRect){lightX,lightY,lightW,lightH};
+    _lightBtn.frame = lightRect;
+    [_lightBtn setImage:[UIImage imageNamed:@"zbar_kaideng.png"]
+               forState:UIControlStateNormal];
+    [_lightBtn setImage:[UIImage imageNamed:@"zbar_kaideng.png"]
+               forState:UIControlStateHighlighted];
+    [_lightBtn addTarget:self
+                  action:@selector(switchLight:)
+         forControlEvents:UIControlEventTouchUpInside];
+    [_bottomView addSubview:_lightBtn];
+    
+    //相册按钮
+    _photoBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    CGFloat photoX = CGRectGetWidth(_bottomView.frame) - scanViewX - btnWidth;
+    CGFloat photoY = CGRectGetMinY(_lightBtn.frame);
+    CGFloat photoW = CGRectGetWidth(_lightBtn.frame);
+    CGFloat photoH = CGRectGetHeight(_lightBtn.frame);
+    CGRect  photoRect = (CGRect){photoX,photoY,photoW,photoH};
+    _photoBtn.frame = photoRect;
+    [_photoBtn setImage:[UIImage imageNamed:@"zbar_xiangce.png"]
+               forState:UIControlStateNormal];
+    [_photoBtn setImage:[UIImage imageNamed:@"zbar_xiangce.png"]
+               forState:UIControlStateHighlighted];
+    [_photoBtn addTarget:self
+                  action:@selector(openAlbum:)
+        forControlEvents:UIControlEventTouchUpInside];
+    [_bottomView addSubview:_photoBtn];
+}
+
+#pragma mark 打开相册
+-(IBAction)openAlbum:(UIButton*)sender
+{
+    if ([self.delegate respondsToSelector:@selector(pickQRCodeImageFromAlbum)]) {
+        [self.delegate pickQRCodeImageFromAlbum];
+    }
+}
+
+#pragma mark 开灯关灯切换
+-(IBAction)switchLight:(UIButton*)sender
+{
+    AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    if (![device hasTorch])
+    {
+        NSLog(@"device has no torch");
+    }
+    else
+    {
+        [device lockForConfiguration:nil];
+        if (!isOn) {
+            isOn = YES;
+            [device setTorchMode: AVCaptureTorchModeOn];
+            [_lightBtn setImage:[UIImage imageNamed:@"zbar_guandeng.png"] forState:UIControlStateNormal];
+        }
+        else
+        {
+            isOn = NO;
+            [device setTorchMode: AVCaptureTorchModeOff];
+            [_lightBtn setImage:[UIImage imageNamed:@"zbar_kaideng.png"] forState:UIControlStateNormal];
+        }
+        [device unlockForConfiguration];
+    }
+}
+
+
+#pragma mark 导航栏
+-(BaseNaviBarWidget*)navBar
+{
+    NavBarViewWidget *nav = [[NavBarViewWidget alloc]init];
+    nav.leftIcon = [UIImage imageNamed:@"back.png"];
+    nav.leftTitle = @"返回";
+    nav.bgcolor = [UIColor blackColor];
+    nav.leftTitleColor = [UIColor whiteColor];
+    nav.alpha = navBarAlpha;
+    nav.centerTitle = @"二维码扫描";
+    nav.delegate = self;
+    return nav;
+}
+
+#pragma mark 创建定时器
+-(void)createTimer
+{
+    if (_scanTimer)
+    {
+        [self stopTimer];
+    }
+    _scanTimer = [NSTimer scheduledTimerWithTimeInterval:1.5f
+                                                  target:self
+                                                selector:@selector(moveLine)
+                                                userInfo:nil
+                                                 repeats:YES];
+}
+
+#pragma mark 停止定时器
+-(void)stopTimer{
+    if ([_scanTimer isValid] == YES)
+    {
+        [_scanTimer invalidate];
+        _scanTimer =nil;
+    }
+}
+
+#pragma mark 滚动扫描线
+-(void)moveLine
+{
+    CGRect lineFrame = _lineImage.frame;
+    CGFloat lineY = lineFrame.origin.y;
+    CGFloat lineH = lineFrame.size.height;
+    if ((lineY + lineH) >= (CGRectGetHeight(_scanCenterView.frame)))
+    {
+        isBottom = YES;
+    }
+    if (isBottom)
+    {
+        lineFrame.origin.y = -lineH;
+    }
+    else
+    {
+        lineFrame.origin.y = CGRectGetHeight(_scanCenterView.frame);
+        
+    }
+    isBottom = NO;
+    [UIView animateWithDuration:1.5 animations:^{
+        _lineImage.frame = lineFrame;
+    }];
+}
+
+#pragma mark 左边按钮被点击
+-(void)leftNavBarBtnClicked:(UIButton *)leftNavBarBtn
+{
+    if([self.delegate respondsToSelector:@selector(leftBtnClicked:qrViewController:)])
+    {
+        [self.delegate leftBtnClicked:leftNavBarBtn qrViewController:self];
+    }
+}
+
+#pragma mark 弹框显示－－带标题
+-(void)showAlert:(NSString*)title message:(NSString*)message type:(AlertViewType)type
+{
+    [ApplicationDelegate showAlert:title message:message type:type];
+}
+@end

@@ -1,0 +1,689 @@
+//
+//  LoginController.m
+//  WashCar
+//
+//  Created by yanshengli on 14-12-19.
+//  Copyright (c) 2014年 cheletong. All rights reserved.
+//
+
+#import "LoginController.h"
+#import "CustBgViewWidget.h"
+#import "LineViewWidget.h"
+#import "HyperlinksButton.h"
+#import "NSString+Utility.h"
+#import "AFViewShaker.h"
+#import "ToolBarWidget.h"
+
+//手机号对应的标签
+#define mobileLabelStr @"手机号："
+//验证码对应的标签
+#define authcodeStr @"验证码："
+//提示信息
+#define tipInfoStr @"跑男通过手机号码联系您哦！"
+//获取验证码
+#define authcodeGetTitle @"获取验证码"
+//确认按钮标题
+#define confirmBtnTitle @"确定"
+//手机号输入框显示的placeholder
+#define mobileufPlaceholderTxt @"请输入手机号"
+//验证码输入框显示的placeholder
+#define authcodeufPlaceholderTxt @"请输入验证码"
+//隐私政策按钮的标题
+#define privacyBtnTitle @"隐私政策"
+//服务条款按钮的标题
+#define serviceBtnTitle @"服务条款"
+//协议左边的文字
+#define protocalLeftLabelStr @"注册表示同意车乐通的"
+//验证码输入框提示信息
+#define authcodeufPlaceholder @"请输入验证码"
+//手机号输入框提示信息
+#define mobileufPlaceholder @"请输入手机号"
+//手机号对应的高度
+#define mobileItemCellH 44.f
+//验证码对应的高度
+#define authcodeItemCellH 44.f
+//确定按钮对应的高度
+#define confirmBtnItemCellH 45.f
+//分割线的高度
+#define seperatorLineH 1.f
+//标签x偏移
+#define labelXOffset 10.f
+//标签的宽度
+#define labelW 60.f
+//手机号文本输入框的宽度
+#define mobileufW 130.f
+//获取手机短信验证码按钮的高度
+#define authcodeBtnH 34.f
+//政策隐私按钮的宽度
+#define privacyBtnW 50.f
+//服务条款按钮的宽度
+#define serviceBtnW 50.f
+//计时器间隔秒数
+#define maxSecond 60
+//标签距离文本输入框的间隔
+#define labelToTextFieldPadding 1.f
+//登录请求对应的tag
+#define doLoginReqTag 100
+//发送短信验证码请求对应的tag
+#define doGetAuthcodeTag 200
+
+/***
+ *
+ *@description:登录和注册页面--实现
+ *@author:liys
+ *@since:2014-1-8
+ *@corp:cheletong
+ */
+@interface LoginController ()
+<UITextFieldDelegate>
+{
+    UITextField *_mobileuf;//手机号码输入框
+    UIButton *_authcodeBtn;//获取验证码的按钮
+    UITextField *_authcodeuf;//验证码输入框
+    UIButton *_confirmBtn;//确认按钮
+    HyperlinksButton *_privacyPolicyBtn;//隐私政策按钮
+    HyperlinksButton *_serviceBtn;//服务条款按钮
+    NSTimer *_authcodeGetTimer;//获取验证码的计时器
+    int _currentSecond;//当前的秒数
+    BOOL _authcodeBtnIsWaiting;//获取验证码按钮是否正在等待
+    AFViewShaker *_viewShake;//抖动
+    BOOL _hasGetAuthcode;//表示是否获取过验证码
+}
+
+@end
+
+@implementation LoginController
+
+#pragma mark 手机号码--通过别的页面传过来
+@synthesize mobileNo;
+
+#pragma mark 登录成功后的回调
+@synthesize sucessCallBack;
+
+#pragma mark 导航栏中间标题
+@synthesize navCenterTitle;
+
+#pragma mark 生命周期方法- viewDidLoad
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    
+    //1.初始化视图
+    [self initView];
+    
+    //2.初始化计时器的当前秒数
+    _currentSecond = maxSecond;
+    
+    //3.初始化获取验证码按钮为非等待状态
+    _authcodeBtnIsWaiting = NO;
+    
+    //4.初始化是否获取过短信验证码的标志
+    _hasGetAuthcode = NO;
+    
+    //5.注册抖动对象
+    [self registerViewShake];
+    
+    //6.注册通知
+    [self registerNofications];
+  
+}
+
+#pragma mark 生命周期方法- viewWillDisappear
+-(void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    [self endTimer];
+}
+
+#pragma mark 生命周期方法- viewWillAppear
+-(void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self endTimer];
+    [self postNotifications];
+}
+
+#pragma mark 生命周期方法- didReceiveMemoryWarning
+-(void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    [self removeNofications];
+    [self endTimer];
+    _mobileuf = nil;
+    _authcodeBtn = nil;
+    _authcodeuf = nil;
+    _confirmBtn = nil;
+    NSLog(@"LoginController didReceiveMemoryWarning");
+}
+
+#pragma mark 注册通知
+-(void)registerNofications
+{
+    [WashcarDefaultCenter addObserver:self
+                             selector:@selector(updateConfirmBtnStatus:)
+                                 name:WashcarUpdateLoginConfirmBtnStatusNotification
+                               object:nil];
+}
+
+#pragma mark 发送通知
+-(void)postNotifications
+{
+    [WashcarDefaultCenter postNotificationName:WashcarUpdateLoginConfirmBtnStatusNotification object:nil];
+}
+
+#pragma mark 移除通知
+-(void)removeNofications
+{
+    [WashcarDefaultCenter removeObserver:self name:WashcarUpdateLoginConfirmBtnStatusNotification object:nil];
+    
+}
+
+#pragma mark 更新确认按钮状态的通知
+-(void)updateConfirmBtnStatus:(NSNotification *)notification
+{
+    //手机号
+    NSString *mobile = _mobileuf.text;
+    //验证码
+    NSString *authcode = _authcodeuf.text;
+    //设置按钮的状态
+    _confirmBtn.enabled = ![CommonUtils isStrEmpty:mobile] && ![CommonUtils isStrEmpty:authcode];
+    //设置发送短信验证按钮的状态
+    if (!_authcodeBtnIsWaiting)
+    {
+        _authcodeBtn.enabled = ![CommonUtils isStrEmpty:mobile];
+    }
+}
+
+#pragma mark 注册抖动对象
+-(void)registerViewShake
+{
+    NSArray *shakeViews = [NSArray arrayWithObjects:_mobileuf,_authcodeuf, nil];
+    _viewShake = [[AFViewShaker alloc]initWithViewsArray:shakeViews];
+}
+
+#pragma mark 初始化视图
+-(void)initView
+{
+    //1.提示信息
+    CGFloat tipInfolbX = 10.f;
+    CGFloat tipInfolbY = CGRectGetMaxY(self.navBar.frame) + 19.f;
+    CGFloat tipInfolbW = SCREEN_WIDTH - 2 * tipInfolbX;
+    CGFloat tipInfolbH = 20.f;
+    CGRect  tipInfolbFrame = Rect(tipInfolbX, tipInfolbY, tipInfolbW, tipInfolbH);
+    UILabel *tipInfolb = [[UILabel alloc]initWithFrame:tipInfolbFrame];
+    tipInfolb.text = tipInfoStr;
+    tipInfolb.textColor = RGB_TextColor_C8;
+    tipInfolb.font = FONT_TextSize_S5;
+    tipInfolb.backgroundColor = [UIColor clearColor];
+    tipInfolb.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self.view addSubview:tipInfolb];
+    
+    //2.背景视图
+    CGFloat bgViewX = CGRectGetMinX(tipInfolb.frame);
+    CGFloat bgViewY = CGRectGetMaxY(tipInfolb.frame) + 9.f;
+    CGFloat bgViewW = CGRectGetWidth(tipInfolb.frame);
+    CGFloat bgViewH = mobileItemCellH + authcodeItemCellH + confirmBtnItemCellH + 2 * seperatorLineH;
+    CGRect  bgViewFrame = Rect(bgViewX, bgViewY, bgViewW, bgViewH);
+    CustBgViewWidget *bgView = [[CustBgViewWidget alloc]initWithFrame:bgViewFrame];
+    [self.view addSubview:bgView];
+    
+    //3.手机号码标签
+    CGFloat mobilelbX = labelXOffset;
+    CGFloat mobilelbY = 0.f;
+    CGFloat mobilelbW = labelW;
+    CGFloat mobilelbH = mobileItemCellH;
+    CGRect  mobilelbFrame = Rect(mobilelbX, mobilelbY, mobilelbW, mobilelbH);
+    UILabel *mobilelb = [[UILabel alloc]initWithFrame:mobilelbFrame];
+    mobilelb.textColor =  RGB_TextColor_C12;
+    mobilelb.font = FONT_TextSize_S6;
+    mobilelb.text = mobileLabelStr;
+    [bgView addSubview:mobilelb];
+    
+    //4.手机号码输入框
+    CGFloat mobileufX = CGRectGetMaxX(mobilelb.frame) + labelToTextFieldPadding;
+    CGFloat mobileufY = CGRectGetMinY(mobilelb.frame);
+    CGFloat mobileufH = mobileItemCellH;
+    CGRect  mobileufFrame = Rect(mobileufX, mobileufY, mobileufW, mobileufH);
+    _mobileuf = [[UITextField alloc]initWithFrame:mobileufFrame];
+    _mobileuf.placeholder = mobileufPlaceholderTxt;
+    _mobileuf.returnKeyType = UIReturnKeyDone;
+    _mobileuf.keyboardType = UIKeyboardTypeNumberPad;
+    _mobileuf.autocorrectionType = UITextAutocorrectionTypeNo;
+    ToolBarWidget *mobileKeyBorderToolBar = [[ToolBarWidget alloc]initWithFrame:Rect(0, 0, SCREEN_WIDTH, 44.f)];
+    mobileKeyBorderToolBar.bgColor = RGB_TextColor_C0;
+    mobileKeyBorderToolBar.centerTitle = mobileufPlaceholder;
+    mobileKeyBorderToolBar.rightCallBack = ^(){
+        [_mobileuf resignFirstResponder];
+        [self postNotifications];
+    };
+    if (![CommonUtils isStrEmpty:self.mobileNo])
+    {
+        _mobileuf.text = self.mobileNo;
+    }
+    _mobileuf.delegate = self;
+    _mobileuf.inputAccessoryView = mobileKeyBorderToolBar;
+    _mobileuf.font = FONT_TextSize_S6;
+    _mobileuf.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    [bgView addSubview:_mobileuf];
+    
+    //5.获取验证码按钮
+    CGFloat authcodeBtnX = CGRectGetMaxX(_mobileuf.frame);
+    CGFloat authcodeBtnY = (mobileItemCellH - authcodeBtnH)/2 ;
+    CGFloat authcodeBtnW = CGRectGetWidth(bgView.frame) - authcodeBtnX - 10.f;
+    CGRect  authcodeBtnFrame = Rect(authcodeBtnX, authcodeBtnY, authcodeBtnW, authcodeBtnH);
+    _authcodeBtn = [CommonUtils washCarBtn:authcodeBtnFrame];
+    [_authcodeBtn setTitle:authcodeGetTitle forState:UIControlStateNormal];
+    [_authcodeBtn setTitle:authcodeGetTitle forState:UIControlStateHighlighted];
+    [_authcodeBtn setTitle:authcodeGetTitle forState:UIControlStateSelected];
+    [_authcodeBtn addTarget:self
+                     action:@selector(getAuthcodeBtnClicked:)
+           forControlEvents:UIControlEventTouchUpInside];//添加按钮事件
+    _authcodeBtn.titleLabel.font = FONT_TextSize_S0;
+    [bgView addSubview:_authcodeBtn];
+    
+    //6.分割线-1
+    LineViewWidget *line1View = [[LineViewWidget alloc]initWithXoffset:CGRectGetMinX(mobilelb.frame)
+                                                               yOffset:CGRectGetMaxY(mobilelb.frame)
+                                                            lineHeight:0.5f
+                                                             lineWidth:CGRectGetWidth(bgView.frame) - 2 * labelXOffset
+                                                             lineColor:0xe3e2e2
+                                                             lineAlpha:1.0];
+    [bgView addSubview:line1View];
+    
+    //7.验证码标签
+    CGFloat authcodelbX = labelXOffset;
+    CGFloat authcodelbY = CGRectGetMaxY(line1View.frame);
+    CGFloat authcodelbW = labelW;
+    CGFloat authcodelbH = authcodeItemCellH;
+    CGRect  authcodelbFrame = Rect(authcodelbX, authcodelbY, authcodelbW, authcodelbH);
+    UILabel *authcodelb = [[UILabel alloc]initWithFrame:authcodelbFrame];
+    authcodelb.textColor =  RGB_TextColor_C12;
+    authcodelb.font = FONT_TextSize_S6;
+    authcodelb.text = authcodeStr;
+    [bgView addSubview:authcodelb];
+    
+    //8.验证码输入框
+    CGFloat authcodeufX = CGRectGetMaxX(authcodelb.frame) + labelToTextFieldPadding;
+    CGFloat authcodeufY = CGRectGetMinY(authcodelb.frame);
+    CGFloat authcodeufW = CGRectGetWidth(bgView.frame) - authcodeufX;
+    CGFloat authcodeufH = authcodeItemCellH;
+    CGRect  authcodeufFrame = Rect(authcodeufX, authcodeufY, authcodeufW, authcodeufH);
+    _authcodeuf = [[UITextField alloc]initWithFrame:authcodeufFrame];
+    _authcodeuf.placeholder = authcodeufPlaceholderTxt;
+    _authcodeuf.returnKeyType = UIReturnKeyDone;
+    _authcodeuf.keyboardType = UIKeyboardTypeNumberPad;
+    ToolBarWidget *authcodeKeyBorderToolBar = [[ToolBarWidget alloc]initWithFrame:Rect(0, 0, SCREEN_WIDTH, 44.f)];
+    authcodeKeyBorderToolBar.bgColor = RGB_TextColor_C0;
+    authcodeKeyBorderToolBar.centerTitle = authcodeufPlaceholder;
+    authcodeKeyBorderToolBar.rightCallBack = ^(){
+        [_authcodeuf resignFirstResponder];
+        [self postNotifications];
+    };
+    _authcodeuf.inputAccessoryView = authcodeKeyBorderToolBar;
+    _authcodeuf.delegate = self;
+    _authcodeuf.font = FONT_TextSize_S6;
+    _authcodeuf.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    [bgView addSubview:_authcodeuf];
+    
+    //9.分割线-2
+    LineViewWidget *line2View = [[LineViewWidget alloc]initWithXoffset:CGRectGetMinX(authcodelb.frame)
+                                                               yOffset:CGRectGetMaxY(authcodelb.frame)
+                                                            lineHeight:0.5f
+                                                             lineWidth:CGRectGetWidth(bgView.frame) - 2 * labelXOffset
+                                                             lineColor:0xe3e2e2
+                                                             lineAlpha:1.0];
+    [bgView addSubview:line2View];
+    
+    //10.确认按钮
+    _confirmBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    CGFloat confirmBtnX = labelXOffset;
+    CGFloat confirmBtnY = CGRectGetMaxY(line2View.frame);
+    CGFloat confirmBtnW = CGRectGetWidth(bgView.frame) - 2 * confirmBtnX;
+    CGFloat confirmBtnH = confirmBtnItemCellH;
+    CGRect  confirmBtnFrame = Rect(confirmBtnX, confirmBtnY, confirmBtnW, confirmBtnH);
+    _confirmBtn.frame = confirmBtnFrame;
+    _confirmBtn.titleLabel.font = FONT_TextSize_S3_Bold;
+    [_confirmBtn setTitle:confirmBtnTitle forState:UIControlStateNormal];
+    [_confirmBtn setTitle:confirmBtnTitle forState:UIControlStateHighlighted];
+    [_confirmBtn setTitleColor:RGB_TextColor_C12 forState:UIControlStateNormal];
+    [_confirmBtn setTitleColor:RGB_TextColor_C12 forState:UIControlStateHighlighted];
+    [_confirmBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateDisabled];
+    [_confirmBtn addTarget:self
+                    action:@selector(confirmBtnClicked:)
+          forControlEvents:UIControlEventTouchUpInside];
+    [bgView addSubview:_confirmBtn];
+    
+    //11.协议视图
+    CGFloat protocalViewX = CGRectGetMinX(bgView.frame);
+    CGFloat protocalViewY = CGRectGetMaxY(bgView.frame) + 16.f;
+    CGFloat protocalViewW = CGRectGetWidth(bgView.frame);
+    CGFloat protocalViewH = 25.f;
+    CGRect  protocalViewFrame = (CGRect){protocalViewX,protocalViewY,protocalViewW,protocalViewH};
+    UIView  *protocalView = [[UIView alloc]initWithFrame:protocalViewFrame];
+    [self.view addSubview:protocalView];
+    
+    //12.protocal左边标签
+    CGFloat protocalleftlbX = 0.f;
+    CGFloat protocalleftlbY = 0.f;
+    CGFloat protocalleftlbW = CGRectGetWidth(protocalView.frame) - privacyBtnW - serviceBtnW - 12.f;
+    CGFloat protocalleftlbH = CGRectGetHeight(protocalView.frame);
+    CGRect  protocalleftlbFrame = (CGRect){protocalleftlbX,protocalleftlbY,protocalleftlbW,protocalleftlbH};
+    UILabel *protocalleftlb = [[UILabel alloc]initWithFrame:protocalleftlbFrame];
+    protocalleftlb.text = protocalLeftLabelStr;
+    protocalleftlb.font = FONT_TextSize_S7;
+    protocalleftlb.textColor = RGB_TextColor_C8;
+    protocalleftlb.textAlignment = NSTextAlignmentRight;
+    protocalleftlb.backgroundColor = [UIColor clearColor];
+    [protocalView addSubview:protocalleftlb];
+    
+    //13.隐私政策按钮
+    _privacyPolicyBtn = [HyperlinksButton buttonWithType:UIButtonTypeCustom];
+    CGFloat privacyPolicyBtnX = CGRectGetMaxX(protocalleftlb.frame);
+    CGFloat privacyPolicyBtnY = CGRectGetMinY(protocalleftlb.frame);
+    CGFloat privacyPolicyBtnH = CGRectGetHeight(protocalView.frame);
+    CGRect  privacyPolicyBtnFrame = (CGRect){privacyPolicyBtnX,privacyPolicyBtnY,privacyBtnW,privacyPolicyBtnH};
+    _privacyPolicyBtn.frame = privacyPolicyBtnFrame;
+    [_privacyPolicyBtn setTitle:privacyBtnTitle forState:UIControlStateNormal];
+    [_privacyPolicyBtn setTitle:privacyBtnTitle forState:UIControlStateHighlighted];
+    [_privacyPolicyBtn setTitle:privacyBtnTitle forState:UIControlStateSelected];
+    _privacyPolicyBtn.titleLabel.font = FONT_TextSize_S0;
+    [_privacyPolicyBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateNormal];
+    [_privacyPolicyBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateHighlighted];
+    [_privacyPolicyBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateSelected];
+    [_privacyPolicyBtn setColor:RGB_TextColor_C8];
+    [protocalView addSubview:_privacyPolicyBtn];
+    
+    //14."和"标签
+    CGFloat andlbX = CGRectGetMaxX(_privacyPolicyBtn.frame);
+    CGFloat andlbY = CGRectGetMinY(protocalleftlb.frame);
+    CGFloat andlbW = 10.f;
+    CGFloat andlbH = CGRectGetHeight(protocalView.frame);
+    CGRect  andlbFrame = (CGRect){andlbX,andlbY,andlbW,andlbH};
+    UILabel *andlb = [[UILabel alloc]initWithFrame:andlbFrame];
+    andlb.text = @"和";
+    andlb.backgroundColor = [UIColor clearColor];
+    andlb.font = FONT_TextSize_S7;
+    andlb.textColor = RGB_TextColor_C8;
+    [protocalView addSubview:andlb];
+    
+    //15.服务政策按钮
+    _serviceBtn = [HyperlinksButton buttonWithType:UIButtonTypeCustom];
+    CGFloat serviceBtnX = CGRectGetMaxX(andlb.frame);
+    CGFloat serviceBtnY = CGRectGetMinY(protocalleftlb.frame);
+    CGFloat serviceBtnH = CGRectGetHeight(protocalView.frame);
+    CGRect  serviceBtnFrame = (CGRect){serviceBtnX,serviceBtnY,serviceBtnW,serviceBtnH};
+    _serviceBtn.frame = serviceBtnFrame;
+    [_serviceBtn setTitle:serviceBtnTitle forState:UIControlStateNormal];
+    [_serviceBtn setTitle:serviceBtnTitle forState:UIControlStateHighlighted];
+    [_serviceBtn setTitle:serviceBtnTitle forState:UIControlStateSelected];
+    _serviceBtn.titleLabel.font = FONT_TextSize_S0;
+    [_serviceBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateNormal];
+    [_serviceBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateHighlighted];
+    [_serviceBtn setTitleColor:RGB_TextColor_C8 forState:UIControlStateSelected];
+    [_serviceBtn setColor:RGB_TextColor_C8];
+    [protocalView addSubview:_serviceBtn];
+    
+}
+
+#pragma mark 确认按钮被点击
+-(void)confirmBtnClicked:(UIButton*)btn
+{
+    [_mobileuf resignFirstResponder];
+    [_authcodeuf resignFirstResponder];
+    if (!_hasGetAuthcode)
+    {
+        [self showAlert:@"亲，请先获取短信验证码哦!" type:AlertViewType_Toast];
+        return;
+    }
+    if ([self validateMobile] && [self validateAuthcode])
+    {
+        [self doLogin];
+    }
+}
+
+#pragma mark 开始登录请求
+-(void)doLogin
+{
+    NSString *mobile = [_mobileuf.text trimNull];
+    NSString *authcode = [_authcodeuf.text trimNull];
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:mobile,@"mobile",authcode,@"authcode", nil];
+    [self doPost:loginUrl params:params tag:doLoginReqTag];
+}
+
+#pragma mark 响应成功后回调
+-(void)handleRespResult:(NSDictionary*)result tag:(int)reqTag
+{
+    if (reqTag == doLoginReqTag)
+    {
+        [self processLoginSucc:result];
+    }
+    else if(reqTag == doGetAuthcodeTag)
+    {
+        [self processGetAuthcodeSucc:result];
+    }
+}
+
+#pragma mark 登录成功
+-(void)processLoginSucc:(NSDictionary*)result
+{
+    //1.回调block
+    if (self.sucessCallBack)
+    {
+        sucessCallBack([_mobileuf.text trimNull],nil);
+    }
+    
+    //2.更新或保存用户token信息
+    NSString *token = [result objectForKey:@"token"];
+    [CommonUtils saveOrUpdateUserToken:token];
+    
+    //3.保存登录后的用户信息
+    NSDictionary *loginUser = [result objectForKey:@"redisUser"];
+    [CommonUtils saveOrUpdateLoginUser:loginUser];
+
+    //4.页面跳转
+    [self gotoBack:nil];
+}
+
+#pragma mark 发送短信验证码成功
+-(void)processGetAuthcodeSucc:(NSDictionary*)result
+{
+    [self beginTimer];
+}
+
+#pragma mark 开始计时
+-(void)beginTimer
+{
+    [self endTimer];
+    _authcodeGetTimer = [NSTimer scheduledTimerWithTimeInterval:1.f
+                                                         target:self
+                                                       selector:@selector(updateAuthcodeBtn:)
+                                                       userInfo:nil
+                                                        repeats:YES];
+    [_authcodeGetTimer fire];
+}
+
+#pragma mark 停止计时器
+-(void)endTimer
+{
+    if (_authcodeGetTimer)
+    {
+        [_authcodeGetTimer invalidate];
+        _authcodeGetTimer = nil;
+    }
+}
+
+#pragma mark 更新
+-(void)updateAuthcodeBtn:(NSTimer*)timer
+{
+    if (_currentSecond <= 0) {
+        [self endTimer];
+        _currentSecond = maxSecond;
+        _authcodeBtnIsWaiting = NO;
+        _authcodeBtn.enabled = ![CommonUtils isStrEmpty:_mobileuf.text];
+        [_authcodeBtn setTitle:authcodeGetTitle forState:UIControlStateNormal];
+    }
+    else
+    {
+        _authcodeBtn.enabled = NO;
+        _authcodeBtnIsWaiting = YES;
+        NSString *timeTipInfo = [NSString stringWithFormat:@"%i秒后获取",_currentSecond];
+        [_authcodeBtn setTitle:timeTipInfo forState:UIControlStateNormal];
+    }
+    _currentSecond--;
+}
+
+#pragma mark 获取短信验证码按钮被点击
+-(void)getAuthcodeBtnClicked:(UIButton*)btn
+{
+    [_mobileuf resignFirstResponder];
+    [_authcodeuf resignFirstResponder];
+    if ([self validateMobile])
+    {
+        //[self doAuthcodeGet];
+        _hasGetAuthcode = YES;
+        [self beginTimer];
+    }
+}
+
+#pragma mark 开始获取短信验证码
+-(void)doAuthcodeGet
+{
+    NSString *mobile = [_mobileuf.text trimNull];
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:mobile,@"mobile", nil];
+    [self doPost:authcodeGetUrl params:params tag:doGetAuthcodeTag];
+}
+
+#pragma mark 校验手机号
+-(BOOL)validateMobile
+{
+    NSString *mobile = _mobileuf.text;
+    if ([CommonUtils isStrEmpty:mobile])
+    {
+        [_viewShake shakeWithDuration:0.5f andView:_mobileuf completion:^{
+            [self showAlert:@"亲，手机号不能为空哦!" type:AlertViewType_Toast];
+        }];
+        return NO;
+    }
+    else if(![mobile isValidMobileNumber])
+    {
+        [_viewShake shakeWithDuration:0.5f andView:_mobileuf completion:^{
+            [self showAlert:@"亲，填写的手机号不符合规范哦!" type:AlertViewType_Toast];
+        }];
+        return NO;
+    }
+    return YES;
+}
+
+#pragma mark 校验验证码
+-(BOOL)validateAuthcode
+{
+    NSString *authcode = _authcodeuf.text;
+    if ([CommonUtils isStrEmpty:authcode])
+    {
+        [_viewShake shakeWithDuration:0.5f andView:_authcodeuf completion:^{
+            [self showAlert:@"亲，短信验证码不能为空哦!" type:AlertViewType_Toast];
+        }];
+        return NO;
+    }
+    else if(![[authcode trimNull]isSmsAuthcode])
+    {
+        [_viewShake shakeWithDuration:0.5f andView:_authcodeuf completion:^{
+            [self showAlert:@"亲，请输入6位数字的短信验证码哦!" type:AlertViewType_Toast];
+        }];
+        return NO;
+    }
+    return YES;
+}
+
+#pragma mark 设置导航栏信息
+-(NavBarInfoModel*)navBarInfo
+{
+    NavBarInfoModel *navBarInfo = [[NavBarInfoModel alloc]init];
+    if ([CommonUtils isStrEmpty:self.navCenterTitle])
+    {
+        self.navCenterTitle = @"输入手机号";
+    }
+    navBarInfo.navCenterTitle = self.navCenterTitle;
+    return navBarInfo;
+}
+
+#pragma mark UITextFieldDelegate代理方法
+- (BOOL)textFieldShouldReturn:(UITextField *)textField
+{
+    [textField resignFirstResponder];
+    return YES;
+}
+
+- (void)textFieldDidEndEditing:(UITextField *)textField
+{
+    [self postNotifications];
+}
+
+- (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string
+{
+    //文本输入框的值
+    NSMutableString *textValue = [textField.text mutableCopy];
+    [textValue replaceCharactersInRange:range withString:string];
+    
+    //更新确认按钮的状态
+    if ([CommonUtils isStrEmpty:textValue])
+    {
+        _confirmBtn.enabled = NO;
+        if(textField == _mobileuf)
+        {
+            _authcodeBtn.enabled = NO;
+        }
+    }
+    else
+    {
+        if (textField == _mobileuf)
+        {
+            _confirmBtn.enabled = ![CommonUtils isStrEmpty:_authcodeuf.text];
+            _authcodeBtn.enabled = !_authcodeBtnIsWaiting;
+            return textValue.length <= 11;
+        }
+        else if(textField == _authcodeuf)
+        {
+            _confirmBtn.enabled = ![CommonUtils isStrEmpty:_mobileuf.text];
+            return textValue.length <= 6;
+        }
+    }
+    return YES;
+}
+
+#pragma mark 是否需要添加TapGesture
+-(BOOL) needAddTapGesture
+{
+    return YES;
+}
+
+#pragma mark 处理Tap手势
+- (void)handleTapGesture:(UITapGestureRecognizer *)gesture
+{
+    [_mobileuf resignFirstResponder];
+    [_authcodeuf resignFirstResponder];
+}
+
+#pragma mark 移除对应的对象
+-(void)dealloc
+{
+    //手机号码输入框
+    _mobileuf = nil;
+    //获取验证码的按钮
+    _authcodeBtn = nil;
+    //验证码输入框
+    _authcodeuf = nil;
+    //确认按钮
+    _confirmBtn = nil;
+    //隐私政策按钮
+    _privacyPolicyBtn = nil;
+    //服务条款按钮
+    _serviceBtn = nil;
+    //计时器
+    [self endTimer];
+    //抖动对象
+    _viewShake = nil;
+    //移除通知
+    [self removeNofications];
+}
+@end

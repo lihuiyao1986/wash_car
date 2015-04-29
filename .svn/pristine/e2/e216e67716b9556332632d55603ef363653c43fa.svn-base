@@ -1,0 +1,17 @@
+//
+//  DateUtils.h
+//  NaChe
+//  日期工具类
+//  Created by nachebang on 14-10-30.
+//  Copyright (c) 2014年 apple. All rights reserved.
+//
+
+#import <Foundation/Foundation.h>
+
+@interface DateUtils : NSObject
++(NSString*)nowForString;
+
+//将日期转化为:刚刚、几分钟前、几天前
++(NSString*)dateFormatString : (NSString*) stringDate;
+
+@end

@@ -1,0 +1,27 @@
+//
+//  PayIndexModel.m
+//  WashCar
+//
+//  Created by yangyixian on 15/1/12.
+//  Copyright (c) 2015年 cheletong. All rights reserved.
+//   支付下单首页模型
+
+#import "PayIndexModel.h"
+
+@implementation PayIndexModel
+
+- (instancetype)initWithDict:(NSDictionary *)dict
+{
+    if (self = [super init]) {
+        //kvc添加数据到模型中
+        [self setValuesForKeysWithDictionary:dict];
+    }
+    return self;
+}
+//构造方法
++ (instancetype)orderWithDict:(NSDictionary *)dict
+{
+    return [[self alloc] initWithDict:dict];
+}
+
+@end
